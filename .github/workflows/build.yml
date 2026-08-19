@@ -1,0 +1,95 @@
+name: build
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = '1.0.0'
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $version = $env:GITHUB_REF.Substring('refs/tags/v'.Length)
+          }
+          Write-Host "Version: $version"
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Restore
+        run: dotnet restore src/BingWallpaper/BingWallpaper.csproj
+
+      - name: Build
+        run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Publish
+        run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
+
+      - name: Self test
+        shell: pwsh
+        run: |
+          $publish = (Resolve-Path publish).Path
+          $exe = Join-Path $publish 'BingWallpaper.exe'
+          $log = Join-Path $publish 'BingWallpaper.log'
+          if (Test-Path $log) { Remove-Item $log -Force }
+          Write-Host "Running $exe --selftest"
+          # The executable is a GUI subsystem binary, so wait for it explicitly and
+          # read the exit code from the process object instead of $LASTEXITCODE.
+          $process = Start-Process -FilePath $exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
+          if (Test-Path $log) {
+            Write-Host '----- BingWallpaper.log -----'
+            Get-Content $log
+            Write-Host '-----------------------------'
+          } else {
+            Write-Host 'No log file was produced.'
+          }
+          if ($process.ExitCode -ne 0) {
+            Write-Error "Self test failed with exit code $($process.ExitCode)."
+            exit 1
+          }
+          Write-Host 'Self test passed.'
+
+      - name: Clean self test leftovers
+        shell: pwsh
+        run: |
+          Get-ChildItem publish -Include 'BingWallpaper.log','BingWallpaper.log.1' -Recurse |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BingWallpaper-win-x64
+          path: publish/BingWallpaper.exe
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: publish/BingWallpaper.exe
+          generate_release_notes: true
+          body: |
+            BingWallpaper ${{ steps.version.outputs.value }} - portable, single file, self contained (win-x64).
+
+            Download `BingWallpaper.exe`, put it into a writable folder and run it.
+            Configuration, log and downloaded wallpapers all stay next to the executable.
