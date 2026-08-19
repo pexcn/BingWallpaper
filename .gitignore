@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+publish/
+artifacts/
+
+# Runtime output of the portable app
+*.log
+*.log.1
+BingWallpaper.ini
+wallpapers/
+
+# IDE / OS noise
+.vs/
+.idea/
+*.user
+*.suo
+Thumbs.db
+.DS_Store
