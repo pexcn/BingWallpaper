@@ -16,19 +16,36 @@
 - 六种填充方式：填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨区
 - 手写深色模式，**在 Windows 10 上同样有效**（不依赖仅 Windows 11 可用的 `Application.SetColorMode`），可跟随系统实时切换
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹 = 完整卸载
-- 零第三方依赖（仅 BCL + P/Invoke），自包含单文件 exe，无需安装 .NET 运行时
+- 零第三方依赖（仅 BCL + P/Invoke），单文件 exe，提供「自包含」与「精简」两种下载
 
 ## 系统要求
 
 - Windows 10 LTSC 2021（build 19044）及以上，64 位
-- 无需安装 .NET 运行时（自包含发布）
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`
+1. 从 [Releases](../../releases) 下载其中一个：
+
+   | 文件 | 体积 | 说明 |
+   |---|---|---|
+   | `BingWallpaper.exe` | ~44 MB | **自包含**，把 .NET 运行时打包在里面，目标机器不需要装任何东西 |
+   | `BingWallpaper-lite.exe` | ~200 KB | **精简版**，需要先安装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
+   两者功能完全相同，选一个即可。
+
 2. 放到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
 3. 双击运行，托盘出现图标后即开始工作
+
+### 为什么自包含版本有 40 多 MB？
+
+因为它把整个 .NET 运行时和 WinForms 一起打进了同一个 exe：CoreCLR、BCL、
+`System.Windows.Forms.dll`、`System.Drawing` 等等，加起来就是这个量级（已开启单文件压缩）。
+程序自身的代码只有 200 KB 左右——这正是 `BingWallpaper-lite.exe` 的大小，它把运行时
+交给系统上已安装的 .NET Desktop Runtime。
+
+这是「免安装」与「体积小」之间的取舍，没有中间地带：几百 KB 的自包含 WinForms 程序不存在。
+（`PublishTrimmed` 也帮不上忙：WinForms 大量依赖反射，官方不支持裁剪，裁了会在运行时随机炸。）
 
 托盘右键菜单：
 
@@ -140,12 +157,18 @@ BingWallpaper.exe --help
 
 ```powershell
 dotnet build   src/BingWallpaper/BingWallpaper.csproj -c Release
+
+# 自包含版（默认）
 dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish
+
+# 精简版（需要目标机器已安装 .NET 10 Desktop Runtime）
+dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish-lite `
+  -p:SelfContained=false -p:EnableCompressionInSingleFile=false
 ```
 
-产物为单个自包含的 `publish\BingWallpaper.exe`（win-x64，未启用裁剪）。
+两个产物都是单文件 win-x64 可执行程序，均未启用裁剪。
 
-CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时执行构建并运行 `--selftest`；打 `v*` 标签时会把 exe 挂到 GitHub Release 上（可直接 `curl -LO` 的公开直链），同时保留 artifact 上传。
+CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建两个版本并分别运行 `--selftest`；打 `v*` 标签时会把两个 exe 都挂到 GitHub Release 上（可直接 `curl -LO` 的公开直链），同时保留 artifact 上传。
 
 ## 技术说明
 
@@ -157,6 +180,11 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
 - 下载先写 `.tmp`、解码校验通过后再原子改名，避免半截文件被当作有效缓存
 - 全局异常钩子（`Application.ThreadException`、`AppDomain.UnhandledException`、`TaskScheduler.UnobservedTaskException`）
   会把完整异常链写入日志并弹出可复制文本的错误对话框
+- 单选框 / 复选框为自绘控件：系统绘制的字形在深色背景下会变成「黑底黑点」，自绘后选中态在两种主题下
+  都是强调色蓝
+- **未启用** `InvariantGlobalization`：不变模式下 `CultureInfo.GetCultureInfo(lcid)` 会抛异常，而 WinForms
+  在切换输入法 / 键盘布局时（`WM_INPUTLANGCHANGE`）必定会调用它，会直接崩溃。Windows 10 1903+ 的 .NET
+  使用系统自带的 ICU，因此保留完整全球化几乎不增加体积
 
 ## 免责声明
 
