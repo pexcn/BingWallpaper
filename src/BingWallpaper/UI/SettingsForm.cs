@@ -25,6 +25,11 @@ internal sealed class SettingsChangedEventArgs : EventArgs
 /// <summary>
 /// Settings window. Every change is applied and persisted immediately, so there is
 /// no "Apply" button - only "Close". Closing hides the window instead of disposing it.
+///
+/// The layout is built from auto sizing panels rather than fixed coordinates so it
+/// stays correct at any DPI, and each radio group lives in its own container -
+/// radio buttons are grouped by their parent, so sharing one parent would make the
+/// resolution and theme options exclude each other.
 /// </summary>
 internal sealed class SettingsForm : Form
 {
@@ -37,19 +42,19 @@ internal sealed class SettingsForm : Form
     private readonly AppConfig _config;
 
     private readonly ComboBox _marketBox = new();
-    private readonly RadioButton _resolution1080 = new();
-    private readonly RadioButton _resolution4K = new();
+    private readonly ThemedRadioButton _resolution4K = new("4K");
+    private readonly ThemedRadioButton _resolution1080 = new("1080p");
     private readonly ComboBox _fitBox = new();
-    private readonly RadioButton _themeSystem = new();
-    private readonly RadioButton _themeLight = new();
-    private readonly RadioButton _themeDark = new();
+    private readonly ThemedRadioButton _themeSystem = new("跟随系统");
+    private readonly ThemedRadioButton _themeLight = new("亮色");
+    private readonly ThemedRadioButton _themeDark = new("暗色");
     private readonly NumericUpDown _intervalBox = new();
     private readonly NumericUpDown _keepDaysBox = new();
-    private readonly CheckBox _startupBox = new();
+    private readonly ThemedCheckBox _startupBox = new("开机自动启动");
     private readonly Button _cleanTracesButton = new();
     private readonly Button _closeButton = new();
-    private readonly Label _pathLabel = new();
 
+    private TableLayoutPanel _root = null!;
     private bool _loading;
 
     public SettingsForm(AppConfig config)
@@ -64,7 +69,7 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleDimensions = new SizeF(7F, 15F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(480, 430);
+        Padding = new Padding(18, 16, 18, 14);
 
         BuildLayout();
         LoadFromConfig();
@@ -81,6 +86,24 @@ internal sealed class SettingsForm : Form
         ThemeManager.ApplyToForm(this);
     }
 
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        FitToContent();
+    }
+
+    /// <summary>
+    /// Sizes the dialog from the measured content instead of hard coded pixels, so
+    /// nothing is clipped at 125%, 150% or any other scaling factor.
+    /// </summary>
+    private void FitToContent()
+    {
+        Size preferred = _root.PreferredSize;
+        int width = Math.Max(preferred.Width, LogicalToDeviceUnits(430)) + Padding.Horizontal;
+        int height = preferred.Height + Padding.Vertical;
+        ClientSize = new Size(width, height);
+    }
+
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         // Hide, never dispose: the tray context keeps the instance alive.
@@ -95,100 +118,146 @@ internal sealed class SettingsForm : Form
 
     private void BuildLayout()
     {
-        const int labelX = 16;
-        const int fieldX = 150;
-        const int fieldWidth = 300;
-        int y = 18;
+        TableLayoutPanel fields = new()
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+            Margin = Padding.Empty,
+        };
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        Controls.Add(CreateLabel("壁纸地区", labelX, y + 3));
-        _marketBox.SetBounds(fieldX, y, 200, 24);
         _marketBox.DropDownStyle = ComboBoxStyle.DropDown;
+        _marketBox.Width = 190;
         _marketBox.Items.AddRange(Markets);
-        Controls.Add(_marketBox);
-        y += 38;
+        AddRow(fields, "壁纸地区", _marketBox);
 
-        Controls.Add(CreateLabel("分辨率", labelX, y + 3));
-        _resolution4K.SetBounds(fieldX, y, 80, 24);
-        _resolution4K.Text = "4K";
-        _resolution1080.SetBounds(fieldX + 90, y, 100, 24);
-        _resolution1080.Text = "1080p";
-        Controls.Add(_resolution4K);
-        Controls.Add(_resolution1080);
-        y += 38;
+        AddRow(fields, "分辨率", CreateGroup(_resolution4K, _resolution1080));
 
-        Controls.Add(CreateLabel("填充方式", labelX, y + 3));
-        _fitBox.SetBounds(fieldX, y, 140, 24);
         _fitBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _fitBox.Width = 150;
         foreach (WallpaperFit fit in Enum.GetValues<WallpaperFit>())
         {
             _fitBox.Items.Add(WallpaperService.GetFitDisplayName(fit));
         }
 
-        Controls.Add(_fitBox);
-        y += 38;
+        AddRow(fields, "填充方式", _fitBox);
 
-        Controls.Add(CreateLabel("界面主题", labelX, y + 3));
-        _themeSystem.SetBounds(fieldX, y, 100, 24);
-        _themeSystem.Text = "跟随系统";
-        _themeLight.SetBounds(fieldX + 105, y, 70, 24);
-        _themeLight.Text = "亮色";
-        _themeDark.SetBounds(fieldX + 180, y, 70, 24);
-        _themeDark.Text = "暗色";
-        Controls.Add(_themeSystem);
-        Controls.Add(_themeLight);
-        Controls.Add(_themeDark);
-        y += 38;
+        AddRow(fields, "界面主题", CreateGroup(_themeSystem, _themeLight, _themeDark));
 
-        Controls.Add(CreateLabel("检查间隔（小时）", labelX, y + 3));
-        _intervalBox.SetBounds(fieldX, y, 80, 24);
+        _intervalBox.Width = 80;
         _intervalBox.Minimum = AppConfig.MinRefreshIntervalHours;
         _intervalBox.Maximum = AppConfig.MaxRefreshIntervalHours;
-        Controls.Add(_intervalBox);
-        y += 38;
+        AddRow(fields, "检查间隔", CreateGroup(_intervalBox, CreateHint("小时")));
 
-        Controls.Add(CreateLabel("壁纸保留天数", labelX, y + 3));
-        _keepDaysBox.SetBounds(fieldX, y, 80, 24);
+        _keepDaysBox.Width = 80;
         _keepDaysBox.Minimum = 0;
         _keepDaysBox.Maximum = AppConfig.MaxKeepDays;
-        Controls.Add(_keepDaysBox);
-        Controls.Add(CreateLabel("0 = 永久保留", fieldX + 90, y + 3));
-        y += 38;
+        AddRow(fields, "壁纸保留天数", CreateGroup(_keepDaysBox, CreateHint("天，0 = 永久保留")));
 
-        _startupBox.SetBounds(fieldX, y, 200, 24);
-        _startupBox.Text = "开机自动启动";
-        Controls.Add(_startupBox);
-        y += 42;
+        AddRow(fields, string.Empty, CreateGroup(_startupBox));
 
-        _cleanTracesButton.SetBounds(labelX, y, 180, 30);
         _cleanTracesButton.Text = "清除所有系统痕迹";
-        Controls.Add(_cleanTracesButton);
+        _cleanTracesButton.AutoSize = true;
+        _cleanTracesButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _cleanTracesButton.Padding = new Padding(10, 5, 10, 5);
+        _cleanTracesButton.Margin = new Padding(0, 0, 8, 0);
 
-        _closeButton.SetBounds(ClientSize.Width - 116, y, 100, 30);
         _closeButton.Text = "关闭";
-        Controls.Add(_closeButton);
-        y += 44;
+        _closeButton.AutoSize = true;
+        _closeButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        _closeButton.Padding = new Padding(24, 5, 24, 5);
+        _closeButton.Margin = new Padding(8, 0, 0, 0);
 
-        _pathLabel.SetBounds(labelX, y, fieldWidth + 140, 76);
-        _pathLabel.AutoSize = false;
-        _pathLabel.Text =
-            "便携模式：配置、日志与壁纸全部保存在程序所在目录，删除整个文件夹即完成卸载。\r\n" +
-            "程序目录：" + Paths.BaseDirectory + "\r\n" +
-            "壁纸目录：" + Paths.WallpaperDirectory;
-        Controls.Add(_pathLabel);
+        FlowLayoutPanel buttons = new()
+        {
+            Dock = DockStyle.Top,
+            FlowDirection = FlowDirection.RightToLeft,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(0, 14, 0, 0),
+            Padding = Padding.Empty,
+        };
+        buttons.Controls.Add(_closeButton);
+        buttons.Controls.Add(_cleanTracesButton);
 
+        _root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = Padding.Empty,
+        };
+        _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _root.Controls.Add(fields, 0, 0);
+        _root.Controls.Add(buttons, 0, 1);
+
+        Controls.Add(_root);
         CancelButton = _closeButton;
     }
 
-    private static Label CreateLabel(string text, int x, int y)
+    /// <summary>Adds a "label + control" row to the field grid.</summary>
+    private static void AddRow(TableLayoutPanel table, string caption, Control field)
     {
         Label label = new()
         {
-            Text = text,
+            Text = caption,
             AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 8, 16, 8),
         };
-        label.Location = new Point(x, y);
-        return label;
+
+        field.Anchor = AnchorStyles.Left;
+        field.Margin = new Padding(0, 4, 0, 4);
+
+        int row = table.RowCount;
+        table.Controls.Add(label, 0, row);
+        table.Controls.Add(field, 1, row);
+        table.RowCount = row + 1;
+        table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
     }
+
+    /// <summary>
+    /// Wraps controls in their own container. For radio buttons this is what makes
+    /// them a mutually exclusive group that is independent from the other groups.
+    /// </summary>
+    private static FlowLayoutPanel CreateGroup(params Control[] children)
+    {
+        FlowLayoutPanel panel = new()
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0, 4, 0, 4),
+            Padding = Padding.Empty,
+        };
+
+        foreach (Control child in children)
+        {
+            child.Margin = new Padding(0, 2, 14, 2);
+            child.Anchor = AnchorStyles.Left;
+            panel.Controls.Add(child);
+        }
+
+        return panel;
+    }
+
+    private static Label CreateHint(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        TextAlign = ContentAlignment.MiddleLeft,
+        Padding = new Padding(0, 4, 0, 0),
+    };
 
     private void LoadFromConfig()
     {
@@ -220,31 +289,12 @@ internal sealed class SettingsForm : Form
         _marketBox.SelectedIndexChanged += (_, _) => CommitMarket();
         _marketBox.Leave += (_, _) => CommitMarket();
 
-        _resolution4K.CheckedChanged += (_, _) =>
-        {
-            if (_loading || !_resolution4K.Checked)
-            {
-                return;
-            }
-
-            _config.Resolution = ResolutionKind.Uhd;
-            Persist(SettingKind.Resolution);
-        };
-
-        _resolution1080.CheckedChanged += (_, _) =>
-        {
-            if (_loading || !_resolution1080.Checked)
-            {
-                return;
-            }
-
-            _config.Resolution = ResolutionKind.FullHd;
-            Persist(SettingKind.Resolution);
-        };
+        _resolution4K.CheckedChanged += (_, _) => CommitResolution(_resolution4K, ResolutionKind.Uhd);
+        _resolution1080.CheckedChanged += (_, _) => CommitResolution(_resolution1080, ResolutionKind.FullHd);
 
         _fitBox.SelectedIndexChanged += (_, _) =>
         {
-            if (_loading || _fitBox.SelectedIndex < 0)
+            if (_loading || _fitBox.SelectedIndex < 0 || _config.Fit == (WallpaperFit)_fitBox.SelectedIndex)
             {
                 return;
             }
@@ -259,7 +309,7 @@ internal sealed class SettingsForm : Form
 
         _intervalBox.ValueChanged += (_, _) =>
         {
-            if (_loading)
+            if (_loading || _config.RefreshIntervalHours == (int)_intervalBox.Value)
             {
                 return;
             }
@@ -270,7 +320,7 @@ internal sealed class SettingsForm : Form
 
         _keepDaysBox.ValueChanged += (_, _) =>
         {
-            if (_loading)
+            if (_loading || _config.KeepDays == (int)_keepDaysBox.Value)
             {
                 return;
             }
@@ -281,7 +331,7 @@ internal sealed class SettingsForm : Form
 
         _startupBox.CheckedChanged += (_, _) =>
         {
-            if (_loading)
+            if (_loading || _config.RunAtStartup == _startupBox.Checked)
             {
                 return;
             }
@@ -292,6 +342,28 @@ internal sealed class SettingsForm : Form
 
         _cleanTracesButton.Click += (_, _) => CleanSystemTraces();
         _closeButton.Click += (_, _) => Hide();
+    }
+
+    private void CommitResolution(RadioButton button, ResolutionKind resolution)
+    {
+        if (_loading || !button.Checked || _config.Resolution == resolution)
+        {
+            return;
+        }
+
+        _config.Resolution = resolution;
+        Persist(SettingKind.Resolution);
+    }
+
+    private void CommitTheme(RadioButton button, ThemeMode mode)
+    {
+        if (_loading || !button.Checked || _config.Theme == mode)
+        {
+            return;
+        }
+
+        _config.Theme = mode;
+        Persist(SettingKind.Theme);
     }
 
     private void CommitMarket()
@@ -326,17 +398,6 @@ internal sealed class SettingsForm : Form
         _marketBox.Text = market;
         _loading = false;
         Persist(SettingKind.Market);
-    }
-
-    private void CommitTheme(RadioButton button, ThemeMode mode)
-    {
-        if (_loading || !button.Checked || _config.Theme == mode)
-        {
-            return;
-        }
-
-        _config.Theme = mode;
-        Persist(SettingKind.Theme);
     }
 
     private void Persist(SettingKind kind)

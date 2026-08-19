@@ -143,6 +143,9 @@ internal static class ThemeManager
             case CheckBox or RadioButton:
                 control.BackColor = palette.WindowBackground;
                 control.ForeColor = palette.Text;
+
+                // The owner drawn check/radio glyphs read the palette while painting.
+                control.Invalidate();
                 break;
 
             case GroupBox:

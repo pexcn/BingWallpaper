@@ -17,7 +17,11 @@ internal sealed class ThemePalette
         Color secondaryText,
         Color hover,
         Color selection,
-        Color selectionText)
+        Color selectionText,
+        Color accent,
+        Color glyphBackground,
+        Color glyphBorder,
+        Color glyphMark)
     {
         IsDark = isDark;
         WindowBackground = windowBackground;
@@ -28,6 +32,10 @@ internal sealed class ThemePalette
         Hover = hover;
         Selection = selection;
         SelectionText = selectionText;
+        Accent = accent;
+        GlyphBackground = glyphBackground;
+        GlyphBorder = glyphBorder;
+        GlyphMark = glyphMark;
     }
 
     public bool IsDark { get; }
@@ -48,6 +56,18 @@ internal sealed class ThemePalette
 
     public Color SelectionText { get; }
 
+    /// <summary>Windows accent blue, used for checked radio buttons and check boxes.</summary>
+    public Color Accent { get; }
+
+    /// <summary>Fill of an unchecked radio/check glyph.</summary>
+    public Color GlyphBackground { get; }
+
+    /// <summary>Outline of an unchecked radio/check glyph.</summary>
+    public Color GlyphBorder { get; }
+
+    /// <summary>The dot/tick drawn on top of the accent fill.</summary>
+    public Color GlyphMark { get; }
+
     public static ThemePalette Light { get; } = new(
         isDark: false,
         windowBackground: SystemColors.Control,
@@ -57,7 +77,11 @@ internal sealed class ThemePalette
         secondaryText: SystemColors.GrayText,
         hover: SystemColors.ControlLight,
         selection: SystemColors.Highlight,
-        selectionText: SystemColors.HighlightText);
+        selectionText: SystemColors.HighlightText,
+        accent: Color.FromArgb(0x00, 0x78, 0xD4),
+        glyphBackground: Color.White,
+        glyphBorder: Color.FromArgb(0x86, 0x86, 0x86),
+        glyphMark: Color.White);
 
     public static ThemePalette Dark { get; } = new(
         isDark: true,
@@ -68,7 +92,11 @@ internal sealed class ThemePalette
         secondaryText: Color.FromArgb(0xC0, 0xC0, 0xC0),
         hover: Color.FromArgb(0x3D, 0x3D, 0x3D),
         selection: Color.FromArgb(0x00, 0x78, 0xD4),
-        selectionText: Color.FromArgb(0xFF, 0xFF, 0xFF));
+        selectionText: Color.FromArgb(0xFF, 0xFF, 0xFF),
+        accent: Color.FromArgb(0x00, 0x78, 0xD4),
+        glyphBackground: Color.FromArgb(0x2D, 0x2D, 0x2D),
+        glyphBorder: Color.FromArgb(0x9A, 0x9A, 0x9A),
+        glyphMark: Color.White);
 
     public static ThemePalette For(bool dark) => dark ? Dark : Light;
 }
