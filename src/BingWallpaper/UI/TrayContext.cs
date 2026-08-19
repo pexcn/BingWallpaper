@@ -119,6 +119,21 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
+    /// <summary>
+    /// Shares metadata that the history window fetched on its own, so both windows
+    /// index into the same list.
+    /// </summary>
+    public void AdoptImages(List<BingImageInfo> images)
+    {
+        if (images.Count == 0)
+        {
+            return;
+        }
+
+        _images = images;
+        UpdateMenuState();
+    }
+
     /// <summary>Downloads (if needed) and applies the image at <paramref name="index"/>.</summary>
     public async Task ApplyIndexAsync(int index, bool force)
     {

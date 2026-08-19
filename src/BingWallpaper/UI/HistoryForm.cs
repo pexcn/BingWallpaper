@@ -125,6 +125,10 @@ internal sealed class HistoryForm : Form
             List<BingImageInfo> images = await _context.Client
                 .FetchAsync(_context.Config.Market, 0, BingClient.MaxImageCount, _context.ShutdownToken)
                 .ConfigureAwait(true);
+
+            // Keep the tray menu and this window on the same list, otherwise the
+            // indices used for applying an image would not match.
+            _context.AdoptImages(images);
             Populate(images);
         }
         catch (OperationCanceledException)

@@ -15,6 +15,14 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      WFO0003 asks to declare high DPI awareness either in the manifest or through
+      the project property, not both. Both are declared on purpose: the manifest
+      entry takes effect before any managed code runs, and the project property
+      keeps the WinForms tooling in sync. The duplication is consistent
+      (PerMonitorV2 in both places), so the warning is suppressed.
+    -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup>
