@@ -39,8 +39,10 @@ jobs:
       - name: Restore
         run: dotnet restore src/BingWallpaper/BingWallpaper.csproj
 
+      # -warnaserror keeps the "no compiler warnings" rule enforced instead of
+      # merely observed. Drop the flag if a future SDK introduces new warnings.
       - name: Build
-        run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -p:Version=${{ steps.version.outputs.value }}
+        run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -warnaserror -p:Version=${{ steps.version.outputs.value }}
 
       # Default download: bundles the .NET runtime, runs on a machine with nothing installed.
       - name: Publish (self contained)

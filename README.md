@@ -28,8 +28,8 @@
 
    | 文件 | 体积 | 说明 |
    |---|---|---|
-   | `BingWallpaper.exe` | ~44 MB | **自包含**，把 .NET 运行时打包在里面，目标机器不需要装任何东西 |
-   | `BingWallpaper-lite.exe` | ~200 KB | **精简版**，需要先安装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+   | `BingWallpaper.exe` | ~47 MB | **自包含**，把 .NET 运行时打包在里面，目标机器不需要装任何东西 |
+   | `BingWallpaper-lite.exe` | ~280 KB | **精简版**，需要先安装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
 
    两者功能完全相同，选一个即可。
 
@@ -41,7 +41,7 @@
 
 因为它把整个 .NET 运行时和 WinForms 一起打进了同一个 exe：CoreCLR、BCL、
 `System.Windows.Forms.dll`、`System.Drawing` 等等，加起来就是这个量级（已开启单文件压缩）。
-程序自身的代码只有 200 KB 左右——这正是 `BingWallpaper-lite.exe` 的大小，它把运行时
+程序自身的代码只有 280 KB 左右——这正是 `BingWallpaper-lite.exe` 的大小，它把运行时
 交给系统上已安装的 .NET Desktop Runtime。
 
 这是「免安装」与「体积小」之间的取舍，没有中间地带：几百 KB 的自包含 WinForms 程序不存在。
