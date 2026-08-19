@@ -1,0 +1,172 @@
+using System.Globalization;
+using System.Runtime.InteropServices;
+using Microsoft.Win32;
+
+namespace BingWallpaper;
+
+/// <summary>
+/// Applies wallpapers and prunes the local cache.
+/// </summary>
+internal static class WallpaperService
+{
+    private const string DesktopKeyPath = @"Control Panel\Desktop";
+
+    /// <summary>
+    /// Sets the desktop wallpaper. The style values must be written *before*
+    /// SystemParametersInfoW, otherwise Windows applies the previous style.
+    /// </summary>
+    public static bool Apply(string imagePath, WallpaperFit fit)
+    {
+        if (!File.Exists(imagePath))
+        {
+            Logger.Error("Cannot apply wallpaper, file does not exist: " + imagePath);
+            return false;
+        }
+
+        string fullPath = Path.GetFullPath(imagePath);
+        (string style, string tile) = GetStyleValues(fit);
+
+        try
+        {
+            // Step 1: style first.
+            using RegistryKey key = Registry.CurrentUser.CreateSubKey(DesktopKeyPath, writable: true)
+                                   ?? throw new InvalidOperationException(
+                                       @"Could not open HKCU\Control Panel\Desktop.");
+            key.SetValue("WallpaperStyle", style, RegistryValueKind.String);
+            key.SetValue("TileWallpaper", tile, RegistryValueKind.String);
+            Logger.Info("Wallpaper style set: fit=" + fit + " WallpaperStyle=" + style + " TileWallpaper=" + tile);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to write wallpaper style values.", ex);
+            return false;
+        }
+
+        // Step 2: tell Windows to load the image. Modern Windows accepts JPEG/PNG
+        // directly, no BMP conversion needed.
+        bool ok = NativeMethods.SystemParametersInfoW(
+            NativeMethods.SPI_SETDESKWALLPAPER,
+            0,
+            fullPath,
+            NativeMethods.SPIF_UPDATEINIFILE | NativeMethods.SPIF_SENDCHANGE);
+
+        int lastError = Marshal.GetLastWin32Error();
+        Logger.Info(
+            "SystemParametersInfoW(SPI_SETDESKWALLPAPER) returned " + ok +
+            (ok ? string.Empty : " lastError=" + lastError) + " path=" + fullPath);
+
+        return ok;
+    }
+
+    /// <summary>Reads the wallpaper path Windows currently reports (best effort).</summary>
+    public static string? GetCurrentWallpaperFromRegistry()
+    {
+        try
+        {
+            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(DesktopKeyPath, writable: false);
+            return key?.GetValue("Wallpaper") as string;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("Could not read the current wallpaper path: " + ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Deletes cached wallpapers older than <paramref name="keepDays"/>.
+    /// The file currently in use is never deleted, no matter how old it is.
+    /// keepDays == 0 means "keep forever" and skips the whole pass.
+    /// </summary>
+    public static int Cleanup(string directory, int keepDays, string? protectedFile)
+    {
+        if (keepDays <= 0)
+        {
+            Logger.Info("Retention is set to keep forever, skipping cleanup.");
+            return 0;
+        }
+
+        if (!Directory.Exists(directory))
+        {
+            return 0;
+        }
+
+        string? protectedFull = null;
+        if (!string.IsNullOrEmpty(protectedFile))
+        {
+            try
+            {
+                protectedFull = Path.GetFullPath(protectedFile);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Could not normalize the protected wallpaper path: " + ex.Message);
+            }
+        }
+
+        DateTime threshold = DateTime.UtcNow.AddDays(-keepDays);
+        int deleted = 0;
+        try
+        {
+            foreach (string file in Directory.EnumerateFiles(directory, "*.jpg", SearchOption.TopDirectoryOnly))
+            {
+                string full = Path.GetFullPath(file);
+                if (protectedFull is not null
+                    && string.Equals(full, protectedFull, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    FileInfo info = new(full);
+                    if (info.LastWriteTimeUtc >= threshold)
+                    {
+                        continue;
+                    }
+
+                    info.Delete();
+                    deleted++;
+                    Logger.Info("Deleted expired wallpaper: " + info.Name);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("Could not delete " + full + ": " + ex.Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Cleanup pass failed.", ex);
+        }
+
+        Logger.Info(
+            "Cleanup finished: " + deleted.ToString(CultureInfo.InvariantCulture) +
+            " file(s) removed (keepDays=" + keepDays + ").");
+        return deleted;
+    }
+
+    /// <summary>Maps a fit mode to the registry values documented for HKCU\Control Panel\Desktop.</summary>
+    public static (string WallpaperStyle, string TileWallpaper) GetStyleValues(WallpaperFit fit) => fit switch
+    {
+        WallpaperFit.Fill => ("10", "0"),
+        WallpaperFit.Fit => ("6", "0"),
+        WallpaperFit.Stretch => ("2", "0"),
+        WallpaperFit.Tile => ("0", "1"),
+        WallpaperFit.Center => ("0", "0"),
+        WallpaperFit.Span => ("22", "0"),
+        _ => ("10", "0"),
+    };
+
+    /// <summary>Localized (zh-CN) display name of a fit mode, used by the settings UI.</summary>
+    public static string GetFitDisplayName(WallpaperFit fit) => fit switch
+    {
+        WallpaperFit.Fill => "填充",
+        WallpaperFit.Fit => "适应",
+        WallpaperFit.Stretch => "拉伸",
+        WallpaperFit.Tile => "平铺",
+        WallpaperFit.Center => "居中",
+        WallpaperFit.Span => "跨区",
+        _ => fit.ToString(),
+    };
+}
