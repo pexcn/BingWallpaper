@@ -265,6 +265,18 @@ internal static class ThemeManager
         ApplyToMenuItems(menu.Items, palette);
     }
 
+    /// <summary>
+    /// Re-colours the items of a menu after their Enabled state changed.
+    /// <para>
+    /// ToolStripMenuItem greys disabled text on its own only as long as nobody has
+    /// assigned ForeColor; this theme assigns it, so the colour becomes a snapshot of
+    /// whatever Enabled was at that moment. An item that starts out disabled and is
+    /// enabled later therefore keeps the grey it was given - which is why this has to
+    /// be called whenever the menu state is recomputed, in both themes.
+    /// </para>
+    /// </summary>
+    public static void RefreshMenuItemColors(ToolStrip menu) => ApplyToMenuItems(menu.Items, Palette);
+
     private static void ApplyToMenuItems(ToolStripItemCollection items, ThemePalette palette)
     {
         foreach (ToolStripItem item in items)

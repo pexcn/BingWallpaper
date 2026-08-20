@@ -621,11 +621,9 @@ internal sealed class TrayContext : ApplicationContext
         // runs - stepping through the list from the tray menu moves both badges.
         _historyForm?.RefreshCurrentMarker();
 
-        if (ThemeManager.IsDark)
-        {
-            // Disabled items need their colour refreshed after the enabled state changes.
-            ThemeManager.ApplyToMenu(_menu);
-        }
+        // Every Enabled flag above was just recomputed, and the item colours follow
+        // them. Not ApplyToMenu: that also builds a renderer, which nothing here needs.
+        ThemeManager.RefreshMenuItemColors(_menu);
     }
 
     private void ShowSettings()
