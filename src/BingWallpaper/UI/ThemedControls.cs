@@ -153,6 +153,15 @@ internal sealed class ThemedComboBox : ComboBox
             g.FillRectangle(background, button);
         }
 
+        // Before the chevron, and with no anti aliasing: an anti aliased one pixel
+        // rectangle only partly covers its corner pixels, and the flat border
+        // underneath is drawn in SystemColors.ControlDark, which stays light in the
+        // dark theme - so the corners came out as four bright dots.
+        using (Pen border = new(palette.Border))
+        {
+            g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+        }
+
         // A chevron, matching what the visual styles draw in the light palette.
         g.SmoothingMode = SmoothingMode.AntiAlias;
         int arm = DpiScale.Round(4);
@@ -166,11 +175,6 @@ internal sealed class ThemedComboBox : ComboBox
                 new Point(centreX, centreY + arm),
                 new Point(centreX + arm, centreY),
             });
-        }
-
-        using (Pen border = new(palette.Border))
-        {
-            g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
         }
     }
 }
