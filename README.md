@@ -200,4 +200,4 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
 
 ## 许可证
 
-[MIT](LICENSE)（仅涵盖本项目代码，不涵盖任何 Bing 图片内容）。
+[GPL-3.0-or-later](LICENSE)（仅涵盖本项目代码，不涵盖任何 Bing 图片内容）。
