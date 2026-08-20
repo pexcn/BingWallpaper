@@ -35,10 +35,6 @@ internal sealed class SettingsChangedEventArgs : EventArgs
 /// Every drop down is as wide as the longest entry of all of them, measured at
 /// run time, so they share one right edge without any of them being wider than
 /// its content needs.
-///
-/// The settings are laid out as two groups side by side. One column of seven rows
-/// produced a tall, narrow dialog; two short columns give the wide window shape
-/// FitToContent finishes off.
 /// </summary>
 internal sealed class SettingsForm : Form
 {
@@ -145,25 +141,13 @@ internal sealed class SettingsForm : Form
 
     /// <summary>
     /// Sizes the dialog from the measured content instead of hard coded pixels, so
-    /// nothing is clipped at 125%, 150% or any other scaling factor, and then widens
-    /// it to a 16:9 window.
-    ///
-    /// The ratio covers the whole window, title bar and borders included, because
-    /// that is the rectangle on screen. The two field groups already land close to
-    /// it, so this adds a few pixels of margin rather than a band of empty space -
-    /// if a future setting changes that, move a row between the groups instead of
-    /// letting the dialog stretch.
+    /// nothing is clipped at 125%, 150% or any other scaling factor.
     /// </summary>
     private void FitToContent()
     {
         Size preferred = _root.PreferredSize;
-        int borderWidth = Size.Width - ClientSize.Width;
-        int borderHeight = Size.Height - ClientSize.Height;
-
+        int width = Math.Max(preferred.Width, DpiScale.Round(340)) + Padding.Horizontal;
         int height = preferred.Height + Padding.Vertical;
-        int widescreen = ((height + borderHeight) * 16 / 9) - borderWidth;
-        int width = Math.Max(preferred.Width + Padding.Horizontal, widescreen);
-
         ClientSize = new Size(width, height);
     }
 
@@ -181,27 +165,34 @@ internal sealed class SettingsForm : Form
 
     private void BuildLayout()
     {
-        // What the wallpaper is, on the left.
-        TableLayoutPanel wallpaper = CreateFieldTable();
+        TableLayoutPanel fields = new()
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+            Margin = Padding.Empty,
+        };
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         // Read only: a free text market code is a typo waiting to happen. A code that
         // is not in this list can still be set by editing the INI file, and
         // LoadFromConfig adds it to the list so it stays visible and selectable.
         _marketBox.Items.AddRange(Markets);
-        AddRow(wallpaper, "壁纸地区", _marketBox);
+        AddRow(fields, "壁纸地区", _marketBox);
 
-        AddRow(wallpaper, "分辨率", CreateGroup(_resolution4K, _resolution1080));
+        AddRow(fields, "分辨率", CreateGroup(_resolution4K, _resolution1080));
 
         foreach (WallpaperFit fit in (WallpaperFit[])Enum.GetValues(typeof(WallpaperFit)))
         {
             _fitBox.Items.Add(WallpaperService.GetFitDisplayName(fit));
         }
 
-        AddRow(wallpaper, "填充方式", _fitBox);
+        AddRow(fields, "填充方式", _fitBox);
 
-        // How the program behaves, on the right.
-        TableLayoutPanel behaviour = CreateFieldTable();
-        behaviour.Margin = new Padding(28, 0, 0, 0);
+        AddRow(fields, "界面主题", CreateGroup(_themeSystem, _themeLight, _themeDark));
 
         // Drop downs instead of NumericUpDown: the spinner buttons of a NumericUpDown
         // are painted by the Windows visual styles and stay light in the dark theme,
@@ -211,37 +202,16 @@ internal sealed class SettingsForm : Form
             _intervalBox.Items.Add(new Choice(hours, FormatHours(hours)));
         }
 
-        AddRow(behaviour, "检查间隔", _intervalBox);
+        AddRow(fields, "检查间隔", _intervalBox);
 
         foreach (int days in new[] { 0, 7, 14, 30, 60, 90, 180, 365 })
         {
             _keepDaysBox.Items.Add(new Choice(days, FormatDays(days)));
         }
 
-        AddRow(behaviour, "保留天数", _keepDaysBox);
+        AddRow(fields, "保留天数", _keepDaysBox);
 
-        AddRow(behaviour, "开机自启", _startupBox);
-
-        TableLayoutPanel columns = new()
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 2,
-            RowCount = 1,
-            Margin = Padding.Empty,
-        };
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        columns.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        columns.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        columns.Controls.Add(wallpaper, 0, 0);
-        columns.Controls.Add(behaviour, 1, 0);
-
-        // Below both groups: the three options are wider than either column. Its label
-        // lines up with the left group because both tables size their label column
-        // from captions of the same length.
-        TableLayoutPanel theme = CreateFieldTable();
-        AddRow(theme, "界面主题", CreateGroup(_themeSystem, _themeLight, _themeDark));
+        AddRow(fields, "开机自启", _startupBox);
 
         _closeButton.Text = "关闭";
         // A fixed size, not AutoSize: ThemeManager swaps FlatStyle between Standard
@@ -276,39 +246,19 @@ internal sealed class SettingsForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
-            RowCount = 4,
+            RowCount = 3,
             Margin = Padding.Empty,
         };
         _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        for (int row = 0; row < _root.RowCount; row++)
-        {
-            _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        }
-
-        _root.Controls.Add(columns, 0, 0);
-        _root.Controls.Add(theme, 0, 1);
-        _root.Controls.Add(separator, 0, 2);
-        _root.Controls.Add(buttons, 0, 3);
+        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _root.Controls.Add(fields, 0, 0);
+        _root.Controls.Add(separator, 0, 1);
+        _root.Controls.Add(buttons, 0, 2);
 
         Controls.Add(_root);
         CancelButton = _closeButton;
-    }
-
-    /// <summary>A "label / field" grid that grows one row at a time.</summary>
-    private static TableLayoutPanel CreateFieldTable()
-    {
-        TableLayoutPanel table = new()
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 2,
-            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
-            Margin = Padding.Empty,
-        };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        return table;
     }
 
     /// <summary>Adds a "label + control" row to the field grid.</summary>
