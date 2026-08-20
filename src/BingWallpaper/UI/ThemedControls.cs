@@ -114,6 +114,32 @@ internal sealed class ThemedRadioButton : RadioButton
     }
 }
 
+/// <summary>
+/// One pixel horizontal rule.
+///
+/// A plain Panel would do, except that ThemeManager paints every unrecognised
+/// control with the window background, which would make the line invisible.
+/// Drawing it here keeps the separator on the palette in both themes.
+/// </summary>
+internal sealed class ThemedSeparator : Control
+{
+    public ThemedSeparator()
+    {
+        // A logical pixel: the form scales this through AutoScaleMode.Dpi, so
+        // DpiScale must not be applied on top of it.
+        Height = 1;
+        TabStop = false;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint, true);
+        SetStyle(ControlStyles.Selectable, false);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        using SolidBrush brush = new(ThemeManager.Palette.Border);
+        e.Graphics.FillRectangle(brush, ClientRectangle);
+    }
+}
+
 /// <summary>Owner drawn check box, same reasoning as <see cref="ThemedRadioButton"/>.</summary>
 internal sealed class ThemedCheckBox : CheckBox
 {

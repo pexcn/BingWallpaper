@@ -31,6 +31,10 @@ internal sealed class SettingsChangedEventArgs : EventArgs
 /// stays correct at any DPI, and each radio group lives in its own container -
 /// radio buttons are grouped by their parent, so sharing one parent would make the
 /// resolution and theme options exclude each other.
+///
+/// The field column takes all the remaining width and the drop downs are anchored
+/// to both of its edges, so they end up equally wide and share one right edge
+/// instead of each carrying a hand picked pixel width.
 /// </summary>
 internal sealed class SettingsForm : Form
 {
@@ -132,26 +136,24 @@ internal sealed class SettingsForm : Form
             Margin = Padding.Empty,
         };
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
         // Read only: a free text market code is a typo waiting to happen. A code that
         // is not in this list can still be set by editing the INI file, and
         // LoadFromConfig adds it to the list so it stays visible and selectable.
         _marketBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _marketBox.Width = 190;
         _marketBox.Items.AddRange(Markets);
-        AddRow(fields, "壁纸地区", _marketBox);
+        AddRow(fields, "壁纸地区", _marketBox, stretch: true);
 
         AddRow(fields, "分辨率", CreateGroup(_resolution4K, _resolution1080));
 
         _fitBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _fitBox.Width = 150;
         foreach (WallpaperFit fit in (WallpaperFit[])Enum.GetValues(typeof(WallpaperFit)))
         {
             _fitBox.Items.Add(WallpaperService.GetFitDisplayName(fit));
         }
 
-        AddRow(fields, "填充方式", _fitBox);
+        AddRow(fields, "填充方式", _fitBox, stretch: true);
 
         AddRow(fields, "界面主题", CreateGroup(_themeSystem, _themeLight, _themeDark));
 
@@ -159,24 +161,24 @@ internal sealed class SettingsForm : Form
         // are painted by the Windows visual styles and stay light in the dark theme,
         // and carrying the unit in the item text removes the separate hint label.
         _intervalBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _intervalBox.Width = 150;
         foreach (int hours in new[] { 1, 2, 3, 4, 6, 8, 12, 24 })
         {
             _intervalBox.Items.Add(new Choice(hours, FormatHours(hours)));
         }
 
-        AddRow(fields, "检查间隔", _intervalBox);
+        AddRow(fields, "检查间隔", _intervalBox, stretch: true);
 
         _keepDaysBox.DropDownStyle = ComboBoxStyle.DropDownList;
-        _keepDaysBox.Width = 150;
         foreach (int days in new[] { 0, 7, 14, 30, 60, 90, 180, 365 })
         {
             _keepDaysBox.Items.Add(new Choice(days, FormatDays(days)));
         }
 
-        AddRow(fields, "壁纸保留天数", _keepDaysBox);
+        AddRow(fields, "保留天数", _keepDaysBox, stretch: true);
 
-        AddRow(fields, string.Empty, CreateGroup(_startupBox));
+        // The check box carries its own caption, so it spans both columns and starts
+        // at the label margin instead of hanging under the field column.
+        AddSpanningRow(fields, _startupBox);
 
         _closeButton.Text = "关闭";
         _closeButton.AutoSize = true;
@@ -191,10 +193,16 @@ internal sealed class SettingsForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             WrapContents = false,
-            Margin = new Padding(0, 14, 0, 0),
+            Margin = new Padding(0, 12, 0, 0),
             Padding = Padding.Empty,
         };
         buttons.Controls.Add(_closeButton);
+
+        ThemedSeparator separator = new()
+        {
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 14, 0, 0),
+        };
 
         _root = new TableLayoutPanel
         {
@@ -202,21 +210,26 @@ internal sealed class SettingsForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
-            RowCount = 2,
+            RowCount = 3,
             Margin = Padding.Empty,
         };
         _root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        _root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _root.Controls.Add(fields, 0, 0);
-        _root.Controls.Add(buttons, 0, 1);
+        _root.Controls.Add(separator, 0, 1);
+        _root.Controls.Add(buttons, 0, 2);
 
         Controls.Add(_root);
         CancelButton = _closeButton;
     }
 
-    /// <summary>Adds a "label + control" row to the field grid.</summary>
-    private static void AddRow(TableLayoutPanel table, string caption, Control field)
+    /// <summary>
+    /// Adds a "label + control" row to the field grid. A stretched field is anchored
+    /// to both edges of the field column, which is what lines the drop downs up.
+    /// </summary>
+    private static void AddRow(TableLayoutPanel table, string caption, Control field, bool stretch = false)
     {
         Label label = new()
         {
@@ -226,14 +239,33 @@ internal sealed class SettingsForm : Form
             Margin = new Padding(0, 8, 16, 8),
         };
 
-        field.Anchor = AnchorStyles.Left;
+        field.Anchor = stretch ? AnchorStyles.Left | AnchorStyles.Right : AnchorStyles.Left;
         field.Margin = new Padding(0, 4, 0, 4);
 
-        int row = table.RowCount;
+        int row = NextRow(table);
         table.Controls.Add(label, 0, row);
         table.Controls.Add(field, 1, row);
+    }
+
+    /// <summary>Adds a control that spans both columns, aligned with the label column.</summary>
+    private static void AddSpanningRow(TableLayoutPanel table, Control field)
+    {
+        field.Anchor = AnchorStyles.Left;
+        // Extra headroom: this row is a switch, not another value to pick.
+        field.Margin = new Padding(0, 12, 0, 4);
+
+        int row = NextRow(table);
+        table.Controls.Add(field, 0, row);
+        table.SetColumnSpan(field, 2);
+    }
+
+    /// <summary>Appends an auto sized row and returns its index.</summary>
+    private static int NextRow(TableLayoutPanel table)
+    {
+        int row = table.RowCount;
         table.RowCount = row + 1;
         table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        return row;
     }
 
     /// <summary>
@@ -280,7 +312,7 @@ internal sealed class SettingsForm : Form
 
     private static string FormatHours(int hours) => hours + " 小时";
 
-    private static string FormatDays(int days) => days == 0 ? "永久保留" : days + " 天";
+    private static string FormatDays(int days) => days == 0 ? "永久" : days + " 天";
 
     /// <summary>
     /// Selects the entry carrying <paramref name="value"/>. A value that no preset
