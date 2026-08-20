@@ -31,7 +31,6 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _historyItem;
     private readonly ToolStripMenuItem _refreshItem;
     private readonly ToolStripMenuItem _folderItem;
-    private readonly ToolStripMenuItem _sourceItem;
     private readonly ToolStripMenuItem _settingsItem;
     private readonly ToolStripMenuItem _exitItem;
 
@@ -53,13 +52,19 @@ internal sealed class TrayContext : ApplicationContext
         _window = new HiddenWindow();
         _window.SystemColorSchemeChanged += (_, _) => ThemeManager.HandleSystemThemeChanged();
 
-        _titleItem = new ToolStripMenuItem("正在获取今日壁纸…") { Enabled = false };
+        // The title row doubles as the "open the image source" command. It has to be
+        // enabled to raise Click at all, so it only greys out - and reads as a plain
+        // header - while there is no link behind it.
+        _titleItem = new ToolStripMenuItem("正在获取今日壁纸…", null, (_, _) => OpenCopyrightLink())
+        {
+            Enabled = false,
+            ToolTipText = "查看图片来源",
+        };
         _newerItem = new ToolStripMenuItem("下一张", null, (_, _) => MoveBy(-1)) { Enabled = false };
         _olderItem = new ToolStripMenuItem("上一张", null, (_, _) => MoveBy(1)) { Enabled = false };
         _historyItem = new ToolStripMenuItem("选择日期…", null, (_, _) => ShowHistory());
         _refreshItem = new ToolStripMenuItem("立即刷新", null, (_, _) => StartRefresh(userInitiated: true));
         _folderItem = new ToolStripMenuItem("打开壁纸文件夹", null, (_, _) => OpenWallpaperFolder());
-        _sourceItem = new ToolStripMenuItem("查看图片来源", null, (_, _) => OpenCopyrightLink()) { Enabled = false };
         _settingsItem = new ToolStripMenuItem("设置…", null, (_, _) => ShowSettings());
         _exitItem = new ToolStripMenuItem("退出", null, (_, _) => ExitApplication());
 
@@ -74,13 +79,12 @@ internal sealed class TrayContext : ApplicationContext
         {
             _titleItem,
             new ToolStripSeparator(),
-            _newerItem,
             _olderItem,
+            _newerItem,
             _historyItem,
             _refreshItem,
             new ToolStripSeparator(),
             _folderItem,
-            _sourceItem,
             new ToolStripSeparator(),
             _settingsItem,
             _exitItem,
@@ -342,7 +346,6 @@ internal sealed class TrayContext : ApplicationContext
         {
             _titleItem.Text = Truncate(_appliedImage.DisplayDate + "  " + _appliedImage.DisplayTitle, 80);
             _tray.Text = Truncate("BingWallpaper - " + _appliedImage.DisplayTitle, 63);
-            _sourceItem.Enabled = !string.IsNullOrWhiteSpace(_appliedImage.CopyrightLink);
         }
         else if (!_busy)
         {
@@ -353,6 +356,10 @@ internal sealed class TrayContext : ApplicationContext
         {
             _titleItem.Text = "正在处理…";
         }
+
+        // Clickable only when there is somewhere to go: no link, or a title that
+        // currently says something else, means the row is just a caption.
+        _titleItem.Enabled = !_busy && !string.IsNullOrWhiteSpace(_appliedImage?.CopyrightLink);
 
         _newerItem.Enabled = !_busy && _currentIndex > 0;
         _olderItem.Enabled = !_busy && _images.Count > 0 && _currentIndex < _images.Count - 1;
