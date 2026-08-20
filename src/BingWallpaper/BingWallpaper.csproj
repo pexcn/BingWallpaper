@@ -26,14 +26,14 @@
   <PropertyGroup>
     <AssemblyName>BingWallpaper</AssemblyName>
     <RootNamespace>BingWallpaper</RootNamespace>
-    <AssemblyTitle>BingWallpaper</AssemblyTitle>
-    <Product>BingWallpaper</Product>
-    <Description>Unofficial, portable Bing daily wallpaper client for Windows.</Description>
-    <Company>BingWallpaper contributors</Company>
-    <Copyright>Copyright (c) BingWallpaper contributors</Copyright>
+    <AssemblyTitle>必应壁纸</AssemblyTitle>
+    <Product>必应壁纸</Product>
+    <Description>一个干净、绿色、开源的必应壁纸客户端。</Description>
+    <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
     <Version>1.0.0</Version>
     <NeutralLanguage>en-US</NeutralLanguage>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
