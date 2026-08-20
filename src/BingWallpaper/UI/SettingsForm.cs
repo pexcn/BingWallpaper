@@ -102,6 +102,21 @@ internal sealed class SettingsForm : Form
         FitToContent();
     }
 
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+
+        // A focused DropDownList paints its value in the system highlight colours,
+        // so the first drop down came up as a blue block - the window hands the
+        // focus to the first control in the tab order, which is the market box. The
+        // close button takes it instead; it is where the focus ends up anyway once
+        // the window has been closed once, which is why reopening looked correct.
+        if (Visible)
+        {
+            ActiveControl = _closeButton;
+        }
+    }
+
     /// <summary>
     /// Gives every drop down the width of the longest entry any of them holds, so
     /// they line up on both edges while staying as narrow as their content.
