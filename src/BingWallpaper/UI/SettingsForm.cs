@@ -68,7 +68,7 @@ internal sealed class SettingsForm : Form
 
         ThemeManager.ApplySystemFont(this);
 
-        Text = "必应壁纸设置";
+        Text = "设置";
         Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
