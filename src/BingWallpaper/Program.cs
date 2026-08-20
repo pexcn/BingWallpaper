@@ -1,10 +1,10 @@
 using System;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
+using Avalonia;
+using Avalonia.Controls;
 using BingWallpaper.Theme;
 using BingWallpaper.UI;
 
@@ -17,7 +17,6 @@ internal static class Program
 
     private static Mutex? _instanceMutex;
     private static EventWaitHandle? _activateEvent;
-    private static TrayContext? _trayContext;
 
     /// <summary>
     /// The program takes no command line arguments: everything it can be told is in
@@ -27,10 +26,21 @@ internal static class Program
     [STAThread]
     private static int Main() => RunGui();
 
+    /// <summary>
+    /// The Avalonia configuration. The backends are named instead of using
+    /// UsePlatformDetect(): detection loads them by reflection, which is exactly
+    /// what a Native AOT build has no way of resolving, and this program only ever
+    /// runs on Windows anyway.
+    /// </summary>
+    public static AppBuilder BuildAvaloniaApp()
+        => AppBuilder.Configure<App>()
+            .UseWin32()
+            .UseSkia();
+
     /// <summary>One line of environment information, written on every start.</summary>
     private static void LogEnvironment()
     {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+        string version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown";
         bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
         Logger.Info(
             "BingWallpaper " + version +
@@ -46,26 +56,19 @@ internal static class Program
     private static int RunGui()
     {
         // The exception hooks come first: a crash before this point would be invisible.
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += OnThreadException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
-
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
 
         // Portable by contract: no silent fallback to %LOCALAPPDATA%.
         if (!Paths.IsBaseDirectoryWritable(out string? writeError))
         {
             Logger.Initialize(null);
-            MessageBox.Show(
+            NativeMethods.ShowMessageBox(
+                "目录不可写",
                 "必应壁纸是一个便携程序，它的配置、日志和壁纸都保存在程序所在的文件夹里。\r\n\r\n" +
                 "当前目录不可写：\r\n" + Paths.BaseDirectory + "\r\n\r\n" +
                 "原因：" + writeError + "\r\n\r\n" +
-                "请把程序移动到有写入权限的目录（例如用户目录或 U 盘）后重新运行。",
-                "目录不可写",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+                "请把程序移动到有写入权限的目录（例如用户目录或 U 盘）后重新运行。");
             return 2;
         }
 
@@ -98,18 +101,20 @@ internal static class Program
                 " runAtStartup=" + config.RunAtStartup +
                 " pinned=" + (config.IsPinned ? config.PinnedWallpaper : "no"));
 
-            ThemeManager.Initialize(config.Theme);
-
             // Portable programs move around; keep the Run key in sync with reality.
             AutoStartManager.Synchronize(config.RunAtStartup);
 
             Paths.EnsureWallpaperDirectory();
 
-            _trayContext = new TrayContext(config);
+            App.Configuration = config;
             StartActivationListener();
-            Application.Run(_trayContext);
-            Logger.Info("Message loop finished, exiting.");
-            return 0;
+
+            // OnExplicitShutdown: this program has no main window, and every window
+            // it does open is closed again while the tray icon stays. The default
+            // would end the process the first time the settings window is closed.
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(
+                Array.Empty<string>(),
+                ShutdownMode.OnExplicitShutdown);
         }
         catch (Exception ex)
         {
@@ -134,8 +139,7 @@ internal static class Program
         {
             try
             {
-                bool createdNew;
-                Mutex mutex = new Mutex(true, prefix + SingleInstanceObject, out createdNew);
+                Mutex mutex = new Mutex(true, prefix + SingleInstanceObject, out bool createdNew);
                 if (!createdNew)
                 {
                     mutex.Dispose();
@@ -168,8 +172,7 @@ internal static class Program
     {
         try
         {
-            EventWaitHandle? handle;
-            if (EventWaitHandle.TryOpenExisting(eventName, out handle) && handle is not null)
+            if (EventWaitHandle.TryOpenExisting(eventName, out EventWaitHandle? handle) && handle is not null)
             {
                 using (handle)
                 {
@@ -187,8 +190,7 @@ internal static class Program
     private static void StartActivationListener()
     {
         EventWaitHandle? handle = _activateEvent;
-        TrayContext? context = _trayContext;
-        if (handle is null || context is null)
+        if (handle is null)
         {
             return;
         }
@@ -200,7 +202,7 @@ internal static class Program
                 try
                 {
                     handle.WaitOne();
-                    context.RequestActivation();
+                    App.Controller?.RequestActivation();
                 }
                 catch (ObjectDisposedException)
                 {
@@ -238,16 +240,12 @@ internal static class Program
         }
     }
 
-    private static void OnThreadException(object sender, ThreadExceptionEventArgs e)
-    {
-        Logger.Error("Unhandled UI thread exception.", e.Exception);
-        ErrorDialog.Show("未处理的异常", Logger.Describe(e.Exception));
-    }
-
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         Exception? ex = e.ExceptionObject as Exception;
-        Logger.Error("Unhandled AppDomain exception (terminating=" + e.IsTerminating + ").", ex ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown"));
+        Logger.Error(
+            "Unhandled exception (terminating=" + e.IsTerminating + ").",
+            ex ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown"));
         ErrorDialog.Show("未处理的异常", Logger.Describe(ex));
     }
 
@@ -256,5 +254,4 @@ internal static class Program
         Logger.Error("Unobserved task exception.", e.Exception);
         e.SetObserved();
     }
-
 }

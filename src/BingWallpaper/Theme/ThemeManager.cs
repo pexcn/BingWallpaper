@@ -1,307 +1,148 @@
 using System;
-using System.Drawing;
-using System.Windows.Forms;
+using Avalonia;
+using Avalonia.Platform;
+using Avalonia.Styling;
 using Microsoft.Win32;
 
 namespace BingWallpaper.Theme;
 
 /// <summary>
-/// Owns the current palette, detects the system theme and repaints every window.
+/// One place decides whether the program is light or dark right now.
 ///
-/// Everything here is hand written on purpose - see DarkModeNative for why
-/// Application.SetColorMode cannot be used on Windows 10.
+/// This used to be several hundred lines of owner drawing and undocumented uxtheme
+/// ordinals, because Windows Forms has no dark mode below Windows 11. Avalonia
+/// draws every pixel itself, so the whole thing collapses into "pick a theme
+/// variant and tell the Fluent theme about it" - and it works the same on
+/// Windows 10 as on Windows 11.
+///
+/// What is left to do by hand is following the system while the mode is
+/// <see cref="ThemeMode.System"/>, and handing the two surfaces this program still
+/// paints itself (the tray menu and the thumbnail tiles) a matching palette.
 /// </summary>
 internal static class ThemeManager
 {
-    private const string PersonalizeKeyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize";
-    private const string AppsUseLightThemeValue = "AppsUseLightTheme";
+    private const string PersonalizeKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
 
-    /// <summary>Raised after the palette changed; forms re-apply themselves.</summary>
+    private static ThemeMode _mode = ThemeMode.System;
+    private static bool _subscribed;
+    private static bool _applied;
+
+    /// <summary>Raised after <see cref="Palette"/> changed.</summary>
     public static event EventHandler? ThemeChanged;
 
-    public static ThemeMode Mode { get; private set; } = ThemeMode.System;
-
+    /// <summary>Colours of the surfaces the program paints itself.</summary>
     public static ThemePalette Palette { get; private set; } = ThemePalette.Light;
 
     public static bool IsDark => Palette.IsDark;
 
     /// <summary>
-    /// Read-only probe of the user's app theme preference. This does not violate the
-    /// "no registry writes" rule - nothing is written here.
+    /// Called once the Avalonia application exists. Subscribing to the platform
+    /// colour values is what makes a theme change in the Windows settings arrive
+    /// while the program is running.
+    /// </summary>
+    public static void Initialize(ThemeMode mode)
+    {
+        _mode = mode;
+
+        if (!_subscribed && Application.Current?.PlatformSettings is IPlatformSettings settings)
+        {
+            settings.ColorValuesChanged += OnColorValuesChanged;
+            _subscribed = true;
+        }
+
+        Apply();
+    }
+
+    /// <summary>Switches to another mode, e.g. because the settings window changed it.</summary>
+    public static void SetMode(ThemeMode mode)
+    {
+        if (_mode == mode)
+        {
+            return;
+        }
+
+        _mode = mode;
+        Apply();
+    }
+
+    /// <summary>
+    /// Whether Windows is currently in dark mode. Answered by Avalonia once it is
+    /// running, and by the registry value it reads itself before that - the startup
+    /// log line is written before the UI exists.
     /// </summary>
     public static bool IsSystemDark()
     {
         try
         {
-            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(PersonalizeKeyPath, writable: false))
+            if (Application.Current?.PlatformSettings is IPlatformSettings settings)
             {
-                object? value = key?.GetValue(AppsUseLightThemeValue);
-                if (value is int number)
-                {
-                    // 0 = dark, 1 = light. A missing value counts as light.
-                    return number == 0;
-                }
+                return settings.GetColorValues().ThemeVariant == PlatformThemeVariant.Dark;
             }
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not read the system theme preference: " + ex.Message);
+            Logger.Warn("Could not read the platform colour values: " + ex.Message);
         }
 
-        return false;
-    }
-
-    /// <summary>Applies a mode without raising the change event (startup path).</summary>
-    public static void Initialize(ThemeMode mode)
-    {
-        Mode = mode;
-        Palette = ThemePalette.For(Resolve(mode));
-        DarkModeNative.SetAppMode(Palette.IsDark);
-        Logger.Info("Theme initialized: mode=" + mode + " effective=" + (Palette.IsDark ? "Dark" : "Light"));
-    }
-
-    /// <summary>Switches the mode and repaints all registered windows.</summary>
-    public static void SetMode(ThemeMode mode)
-    {
-        bool dark = Resolve(mode);
-        bool changed = mode != Mode || dark != Palette.IsDark;
-        Mode = mode;
-        if (!changed)
-        {
-            return;
-        }
-
-        Palette = ThemePalette.For(dark);
-        DarkModeNative.SetAppMode(dark);
-        Logger.Info("Theme changed: mode=" + mode + " effective=" + (dark ? "Dark" : "Light"));
-        ThemeChanged?.Invoke(null, EventArgs.Empty);
+        return IsSystemDarkFromRegistry();
     }
 
     /// <summary>
-    /// Called when WM_SETTINGCHANGE/"ImmersiveColorSet" arrives. Only the
-    /// "follow system" mode reacts to it.
+    /// HKCU\...\Themes\Personalize\AppsUseLightTheme. Read only, and a missing value
+    /// means light - that is what Windows itself assumes.
     /// </summary>
-    public static void HandleSystemThemeChanged()
-    {
-        if (Mode != ThemeMode.System)
-        {
-            return;
-        }
-
-        bool dark = IsSystemDark();
-        if (dark == Palette.IsDark)
-        {
-            return;
-        }
-
-        Palette = ThemePalette.For(dark);
-        DarkModeNative.SetAppMode(dark);
-        Logger.Info("System theme changed, now " + (dark ? "Dark" : "Light") + ".");
-        ThemeChanged?.Invoke(null, EventArgs.Empty);
-    }
-
-    private static bool Resolve(ThemeMode mode) => mode switch
-    {
-        ThemeMode.Light => false,
-        ThemeMode.Dark => true,
-        _ => IsSystemDark(),
-    };
-
-    /// <summary>
-    /// Applies the real Windows UI font. .NET Framework still defaults controls to
-    /// MS Sans Serif 8.25pt, which looks dated and measures differently from the
-    /// font the rest of the system uses (Segoe UI / Microsoft YaHei UI 9pt).
-    /// </summary>
-    public static void ApplySystemFont(Control control)
+    private static bool IsSystemDarkFromRegistry()
     {
         try
         {
-            Font? font = SystemFonts.MessageBoxFont;
-            if (font is not null)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(PersonalizeKeyPath, writable: false))
             {
-                control.Font = font;
+                return key?.GetValue("AppsUseLightTheme") is int value && value == 0;
             }
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not apply the system UI font: " + ex.Message);
+            Logger.Warn("Could not read the system theme setting: " + ex.Message);
+            return false;
         }
     }
 
-    /// <summary>Applies the palette to a whole window, including its title bar.</summary>
-    public static void ApplyToForm(Form form)
+    private static void OnColorValuesChanged(object? sender, PlatformColorValues values)
     {
-        if (form.IsHandleCreated)
-        {
-            DarkModeNative.AllowDarkModeForHandle(form.Handle, Palette.IsDark);
-            DarkModeNative.ApplyTitleBar(form.Handle, Palette.IsDark);
-        }
-
-        ApplyToControl(form);
-        form.Invalidate(invalidateChildren: true);
-    }
-
-    /// <summary>Recursively colours a control tree.</summary>
-    public static void ApplyToControl(Control control)
-    {
-        ThemePalette palette = Palette;
-        bool dark = palette.IsDark;
-
-        switch (control)
-        {
-            case Form form:
-                form.BackColor = palette.WindowBackground;
-                form.ForeColor = palette.Text;
-                break;
-
-            case Button button:
-                // Every button in this UI is a ThemedButton, which reads the palette
-                // while painting: the colours here only keep the control's own
-                // background from showing through during a resize, and the repaint is
-                // what actually applies the theme. Setting FlatStyle would fight the
-                // one the owner drawn button picked for itself.
-                button.BackColor = dark ? palette.ControlBackground : SystemColors.Control;
-                button.ForeColor = palette.Text;
-                button.Invalidate();
-                break;
-
-            case CheckBox or RadioButton:
-                control.BackColor = palette.WindowBackground;
-                control.ForeColor = palette.Text;
-
-                // The owner drawn check/radio glyphs read the palette while painting.
-                control.Invalidate();
-                break;
-
-            case GroupBox:
-                control.BackColor = palette.WindowBackground;
-                control.ForeColor = palette.Text;
-                break;
-
-            case LinkLabel link:
-                link.BackColor = palette.WindowBackground;
-                link.ForeColor = palette.Text;
-                link.LinkColor = dark ? palette.Selection : SystemColors.HotTrack;
-                link.ActiveLinkColor = palette.Selection;
-                link.VisitedLinkColor = dark ? palette.Selection : SystemColors.HotTrack;
-                break;
-
-            case Label:
-                control.BackColor = palette.WindowBackground;
-                control.ForeColor = palette.Text;
-                break;
-
-            case TextBox textBox:
-                textBox.BackColor = palette.ControlBackground;
-                textBox.ForeColor = palette.Text;
-                textBox.BorderStyle = BorderStyle.FixedSingle;
-                ApplyNativeTheme(textBox, dark ? "DarkMode_CFD" : null);
-                break;
-
-            case ComboBox comboBox:
-                comboBox.BackColor = palette.ControlBackground;
-                comboBox.ForeColor = palette.Text;
-                comboBox.FlatStyle = dark ? FlatStyle.Flat : FlatStyle.Standard;
-                ApplyNativeTheme(comboBox, dark ? "DarkMode_CFD" : null);
-                break;
-
-            case NumericUpDown numeric:
-                numeric.BackColor = palette.ControlBackground;
-                numeric.ForeColor = palette.Text;
-                numeric.BorderStyle = BorderStyle.FixedSingle;
-                ApplyNativeTheme(numeric, dark ? "DarkMode_CFD" : null);
-                break;
-
-            case ListView listView:
-                listView.BackColor = palette.ControlBackground;
-                listView.ForeColor = palette.Text;
-                listView.BorderStyle = BorderStyle.FixedSingle;
-                ApplyNativeTheme(listView, dark ? "DarkMode_Explorer" : "Explorer");
-                break;
-
-            case ProgressBar:
-                break;
-
-            default:
-                control.BackColor = palette.WindowBackground;
-                control.ForeColor = palette.Text;
-                break;
-        }
-
-        if (control.ContextMenuStrip is not null)
-        {
-            ApplyToMenu(control.ContextMenuStrip);
-        }
-
-        foreach (Control child in control.Controls)
-        {
-            ApplyToControl(child);
-        }
-    }
-
-    /// <summary>Themes a context menu; dark mode needs a custom renderer.</summary>
-    public static void ApplyToMenu(ToolStrip menu)
-    {
-        ThemePalette palette = Palette;
-        menu.BackColor = palette.ControlBackground;
-        menu.ForeColor = palette.Text;
-
-        if (palette.IsDark)
-        {
-            // Assigning a renderer implicitly switches RenderMode to Custom, which is
-            // what the professional renderer subclass needs.
-            menu.Renderer = new DarkContextMenuRenderer(palette);
-        }
-        else
-        {
-            menu.RenderMode = ToolStripRenderMode.Professional;
-            menu.Renderer = new ToolStripProfessionalRenderer();
-        }
-
-        if (menu.IsHandleCreated)
-        {
-            DarkModeNative.AllowDarkModeForHandle(menu.Handle, palette.IsDark);
-        }
-
-        ApplyToMenuItems(menu.Items, palette);
-    }
-
-    /// <summary>
-    /// Re-colours the items of a menu after their Enabled state changed.
-    /// <para>
-    /// ToolStripMenuItem greys disabled text on its own only as long as nobody has
-    /// assigned ForeColor; this theme assigns it, so the colour becomes a snapshot of
-    /// whatever Enabled was at that moment. An item that starts out disabled and is
-    /// enabled later therefore keeps the grey it was given - which is why this has to
-    /// be called whenever the menu state is recomputed, in both themes.
-    /// </para>
-    /// </summary>
-    public static void RefreshMenuItemColors(ToolStrip menu) => ApplyToMenuItems(menu.Items, Palette);
-
-    private static void ApplyToMenuItems(ToolStripItemCollection items, ThemePalette palette)
-    {
-        foreach (ToolStripItem item in items)
-        {
-            item.BackColor = palette.ControlBackground;
-            item.ForeColor = item.Enabled ? palette.Text : palette.SecondaryText;
-
-            if (item is ToolStripMenuItem menuItem && menuItem.HasDropDownItems)
-            {
-                menuItem.DropDown.BackColor = palette.ControlBackground;
-                menuItem.DropDown.ForeColor = palette.Text;
-                ApplyToMenuItems(menuItem.DropDownItems, palette);
-            }
-        }
-    }
-
-    private static void ApplyNativeTheme(Control control, string? theme)
-    {
-        if (!control.IsHandleCreated)
+        if (_mode != ThemeMode.System)
         {
             return;
         }
 
-        DarkModeNative.AllowDarkModeForHandle(control.Handle, Palette.IsDark);
-        DarkModeNative.ApplyWindowTheme(control.Handle, theme);
+        Logger.Debug("The system colour scheme changed to " + values.ThemeVariant + ".");
+        Apply();
+    }
+
+    private static void Apply()
+    {
+        bool dark = _mode switch
+        {
+            ThemeMode.Light => false,
+            ThemeMode.Dark => true,
+            _ => IsSystemDark(),
+        };
+
+        // Never ThemeVariant.Default: the effective variant is decided here, in one
+        // place, so that the palette below and the stock controls cannot disagree
+        // about which theme is in effect.
+        if (Application.Current is Application app)
+        {
+            app.RequestedThemeVariant = dark ? ThemeVariant.Dark : ThemeVariant.Light;
+        }
+
+        if (_applied && Palette.IsDark == dark)
+        {
+            return;
+        }
+
+        _applied = true;
+        Palette = ThemePalette.For(dark);
+        Logger.Info("Theme applied: mode=" + _mode + " effective=" + (dark ? "Dark" : "Light"));
+        ThemeChanged?.Invoke(null, EventArgs.Empty);
     }
 }

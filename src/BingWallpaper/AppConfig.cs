@@ -120,9 +120,7 @@ internal sealed class AppConfig
     /// <summary>Normalizes a market code to the "xx-YY" shape Bing expects.</summary>
     public static string NormalizeMarket(string? market)
     {
-        // string.IsNullOrWhiteSpace has no [NotNullWhen(false)] annotation in the
-        // .NET Framework reference assemblies, so the null check is written out.
-        if (market is null || market.Trim().Length == 0)
+        if (string.IsNullOrWhiteSpace(market))
         {
             return "zh-CN";
         }
@@ -153,18 +151,10 @@ internal sealed class AppConfig
             return string.Empty;
         }
 
-        try
+        if (trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
+            && string.Equals(Path.GetFileName(trimmed), trimmed, StringComparison.Ordinal))
         {
-            // Path.GetFileName throws on invalid path characters here - the .NET
-            // Framework overload validates its argument, unlike the modern one.
-            if (string.Equals(Path.GetFileName(trimmed), trimmed, StringComparison.Ordinal))
-            {
-                return trimmed;
-            }
-        }
-        catch (ArgumentException)
-        {
-            // Falls through to the warning below.
+            return trimmed;
         }
 
         Logger.Warn("Ignoring PinnedWallpaper, it is not a plain file name: " + trimmed);
@@ -261,6 +251,6 @@ internal sealed class AppConfig
         where TEnum : struct, Enum
         => Enum.TryParse(value.Trim(), ignoreCase: true, out TEnum parsed) ? parsed : fallback;
 
-    /// <summary>Math.Clamp does not exist on .NET Framework.</summary>
-    public static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
+    /// <summary>Named wrapper so the call sites read the same as they always did.</summary>
+    public static int Clamp(int value, int min, int max) => Math.Clamp(value, min, max);
 }

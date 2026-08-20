@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Reflection;
 
 namespace BingWallpaper;
 
@@ -16,29 +15,18 @@ internal static class Paths
 
     static Paths()
     {
-        string? exe = null;
-        try
-        {
-            exe = Assembly.GetEntryAssembly()?.Location;
-        }
-        catch (Exception)
-        {
-            exe = null;
-        }
-
-        if (string.IsNullOrEmpty(exe))
-        {
-            exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
-        }
+        // Environment.ProcessPath, not Assembly.Location: a Native AOT executable
+        // carries no managed assembly file, so Location is an empty string there.
+        string? exe = Environment.ProcessPath;
 
         if (!string.IsNullOrEmpty(exe))
         {
-            ExecutablePath = Path.GetFullPath(exe!);
-            BaseDirectory = Path.GetDirectoryName(ExecutablePath) ?? AppDomain.CurrentDomain.BaseDirectory;
+            ExecutablePath = Path.GetFullPath(exe);
+            BaseDirectory = Path.GetDirectoryName(ExecutablePath) ?? AppContext.BaseDirectory;
         }
         else
         {
-            BaseDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            BaseDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             ExecutablePath = Path.Combine(BaseDirectory, "BingWallpaper.exe");
         }
     }
@@ -107,8 +95,9 @@ internal static class Paths
 
     /// <summary>
     /// Replaces <paramref name="destination"/> with <paramref name="source"/>.
-    /// File.Move has no overwrite overload on .NET Framework, and File.Replace is
-    /// the atomic option when the destination already exists.
+    /// File.Replace is the atomic option when the destination already exists; the
+    /// overwriting File.Move is the fallback for the cases it refuses - a different
+    /// volume, or a file system that does not implement it.
     /// </summary>
     public static void MoveOverwrite(string source, string destination)
     {
@@ -121,14 +110,14 @@ internal static class Paths
             }
             catch (IOException)
             {
-                File.Delete(destination);
+                // Falls through to the plain move below.
             }
             catch (PlatformNotSupportedException)
             {
-                File.Delete(destination);
+                // Same.
             }
         }
 
-        File.Move(source, destination);
+        File.Move(source, destination, overwrite: true);
     }
 }

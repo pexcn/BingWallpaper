@@ -1,117 +1,70 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Threading;
 using BingWallpaper.Theme;
 
 namespace BingWallpaper.UI;
 
 /// <summary>
-/// The application itself: a tray icon, a timer and the refresh logic.
-/// There is no main window - the message loop is hosted by an
-/// <see cref="ApplicationContext"/> plus a hidden window used for broadcasts.
+/// The application itself: a tray icon, a menu, a timer and the refresh logic.
+/// There is no main window - the Avalonia lifetime is told to shut down only when
+/// this asks it to.
 /// </summary>
-internal sealed class TrayContext : ApplicationContext
+internal sealed class TrayController : IDisposable
 {
     private readonly AppConfig _config;
     private readonly BingClient _client = new();
-    private readonly HiddenWindow _window;
-    private readonly NotifyIcon _tray;
-    private readonly ContextMenuStrip _menu;
-    private readonly System.Windows.Forms.Timer _timer;
-
-    private readonly ToolStripMenuItem _titleItem;
-    private readonly ToolStripMenuItem _newerItem;
-    private readonly ToolStripMenuItem _olderItem;
-    private readonly ToolStripMenuItem _historyItem;
-    private readonly ToolStripMenuItem _refreshItem;
-    private readonly ToolStripMenuItem _pinItem;
-    private readonly ToolStripMenuItem _folderItem;
-    private readonly ToolStripMenuItem _settingsItem;
-    private readonly ToolStripMenuItem _exitItem;
-
+    private readonly TrayIconHost _tray;
+    private readonly TrayMenuWindow _menu = new();
+    private readonly DispatcherTimer _timer = new();
     private readonly CancellationTokenSource _shutdown = new();
 
     private List<BingImageInfo> _images = new();
     private int _currentIndex;
     private string? _appliedPath;
     private BingImageInfo? _appliedImage;
-    private SettingsForm? _settingsForm;
-    private HistoryForm? _historyForm;
+    private SettingsWindow? _settingsWindow;
+    private HistoryWindow? _historyWindow;
     private bool _busy;
     private bool _disposed;
 
-    public TrayContext(AppConfig config)
+    public TrayController(AppConfig config)
     {
         _config = config;
 
-        _window = new HiddenWindow();
-        _window.SystemColorSchemeChanged += (_, _) => ThemeManager.HandleSystemThemeChanged();
+        _tray = new TrayIconHost("必应壁纸");
+        _tray.DoubleClicked += (_, _) => ShowSettings();
+        _tray.MenuRequested += (_, e) => _menu.ShowAt(e.Position);
 
-        // The title row doubles as the "open the image source" command. It has to be
-        // enabled to raise Click at all, so it only greys out - and reads as a plain
-        // header - while there is no link behind it.
-        _titleItem = new ToolStripMenuItem("正在获取今日壁纸…", null, (_, _) => OpenCopyrightLink())
-        {
-            Enabled = false,
-            ToolTipText = "查看图片来源",
-        };
-        _newerItem = new ToolStripMenuItem("下一张", null, (_, _) => MoveBy(-1)) { Enabled = false };
-        _olderItem = new ToolStripMenuItem("上一张", null, (_, _) => MoveBy(1)) { Enabled = false };
-        _historyItem = new ToolStripMenuItem("选择日期…", null, (_, _) => ShowHistory());
-        _refreshItem = new ToolStripMenuItem("立即刷新", null, (_, _) => StartRefresh(userInitiated: true));
-        _pinItem = new ToolStripMenuItem("固定当前壁纸", null, (_, _) => TogglePin())
-        {
-            Enabled = false,
-            ToolTipText = "固定后不再随检查间隔自动更换",
-        };
-        _folderItem = new ToolStripMenuItem("打开壁纸目录", null, (_, _) => OpenWallpaperFolder());
-        _settingsItem = new ToolStripMenuItem("设置…", null, (_, _) => ShowSettings());
-        _exitItem = new ToolStripMenuItem("退出", null, (_, _) => ExitApplication());
+        // The title row doubles as the "open the image source" command. It only
+        // greys out - and reads as a plain header - while there is no link behind it.
+        Wire(_menu.TitleRow, OpenCopyrightLink);
+        Wire(_menu.Older, () => MoveBy(1));
+        Wire(_menu.Newer, () => MoveBy(-1));
+        Wire(_menu.History, ShowHistory);
+        Wire(_menu.Refresh, () => StartRefresh(userInitiated: true));
+        Wire(_menu.Pin, TogglePin);
+        Wire(_menu.Folder, OpenWallpaperFolder);
+        Wire(_menu.Settings, ShowSettings);
+        Wire(_menu.Exit, ExitApplication);
 
-        _menu = new ContextMenuStrip();
-        Font? menuFont = SystemFonts.MenuFont;
-        if (menuFont is not null)
-        {
-            _menu.Font = menuFont;
-        }
+        _menu.TitleRow.IsEnabled = false;
+        _menu.Older.IsEnabled = false;
+        _menu.Newer.IsEnabled = false;
+        _menu.Pin.IsEnabled = false;
 
-        _menu.Items.AddRange(new ToolStripItem[]
-        {
-            _titleItem,
-            new ToolStripSeparator(),
-            _olderItem,
-            _newerItem,
-            _historyItem,
-            _refreshItem,
-            _pinItem,
-            new ToolStripSeparator(),
-            _folderItem,
-            new ToolStripSeparator(),
-            _settingsItem,
-            _exitItem,
-        });
-
-        _tray = new NotifyIcon
-        {
-            Icon = AppIcon.Tray,
-            Text = "必应壁纸",
-            Visible = true,
-            ContextMenuStrip = _menu,
-        };
-        _tray.DoubleClick += (_, _) => ShowSettings();
-
-        _timer = new System.Windows.Forms.Timer { Interval = GetIntervalMilliseconds() };
+        _timer.Interval = GetInterval();
         _timer.Tick += (_, _) => StartRefresh(userInitiated: false);
         _timer.Start();
 
         ThemeManager.ThemeChanged += OnThemeChanged;
-        ThemeManager.ApplyToMenu(_menu);
 
         // Before the first network call: from here on the cleanup passes and the
         // menu have something to work with even while the metadata request is still
@@ -119,7 +72,7 @@ internal sealed class TrayContext : ApplicationContext
         RestorePinnedWallpaper();
 
         // Run the first check as soon as the message loop starts.
-        _window.BeginInvoke(new Action(() => StartRefresh(userInitiated: false)));
+        Dispatcher.UIThread.Post(() => StartRefresh(userInitiated: false));
     }
 
     /// <summary>Metadata of the last 8 days, newest first.</summary>
@@ -138,17 +91,7 @@ internal sealed class TrayContext : ApplicationContext
     public CancellationToken ShutdownToken => _shutdown.Token;
 
     /// <summary>Called from the single instance listener thread.</summary>
-    public void RequestActivation()
-    {
-        try
-        {
-            _window.BeginInvoke(new Action(ShowSettings));
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn("Could not activate the settings window: " + ex.Message);
-        }
-    }
+    public void RequestActivation() => Dispatcher.UIThread.Post(ShowSettings);
 
     /// <summary>
     /// Shares metadata that the history window fetched on its own, so both windows
@@ -207,49 +150,52 @@ internal sealed class TrayContext : ApplicationContext
         UpdateMenuState();
     }
 
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing && !_disposed)
-        {
-            _disposed = true;
-            ThemeManager.ThemeChanged -= OnThemeChanged;
-            try
-            {
-                _shutdown.Cancel();
-            }
-            catch (Exception ex)
-            {
-                Logger.Debug("Cancelling background work failed: " + ex.Message);
-            }
+    /// <summary>
+    /// Applies a history selection (called by HistoryWindow). Picking a picture out
+    /// of the window is a deliberate choice, so it pins on its own - unlike stepping
+    /// through the list from the tray menu, which is just browsing.
+    /// </summary>
+    public Task ApplyFromHistoryAsync(int index) => MoveToAsync(index, pinAfterwards: true);
 
-            _timer.Stop();
-            _timer.Dispose();
-            _tray.Visible = false;
-            _tray.Dispose();
-            _menu.Dispose();
-            _settingsForm?.Dispose();
-            _historyForm?.Dispose();
-            _window.Dispose();
-            _client.Dispose();
-            _shutdown.Dispose();
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
         }
 
-        base.Dispose(disposing);
+        _disposed = true;
+        ThemeManager.ThemeChanged -= OnThemeChanged;
+
+        try
+        {
+            _shutdown.Cancel();
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("Cancelling background work failed: " + ex.Message);
+        }
+
+        _timer.Stop();
+        _tray.Dispose();
+        _menu.Hide();
+        _settingsWindow?.CloseForGood();
+        _historyWindow?.CancelPendingWork();
+        _historyWindow?.CloseForGood();
+        _client.Dispose();
+        _shutdown.Dispose();
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e)
+    private void Wire(MenuRow row, Action action)
     {
-        ThemeManager.ApplyToMenu(_menu);
-        if (_settingsForm is { IsDisposed: false })
+        row.Invoked += (_, _) =>
         {
-            ThemeManager.ApplyToForm(_settingsForm);
-        }
-
-        if (_historyForm is { IsDisposed: false })
-        {
-            ThemeManager.ApplyToForm(_historyForm);
-        }
+            _menu.Hide();
+            action();
+        };
     }
+
+    private void OnThemeChanged(object? sender, EventArgs e) => _menu.ApplyTheme();
 
     private void StartRefresh(bool userInitiated) => _ = RefreshAsync(userInitiated);
 
@@ -271,7 +217,7 @@ internal sealed class TrayContext : ApplicationContext
                 .ConfigureAwait(true);
 
             _images = images;
-            _historyForm?.OnImagesRefreshed(images);
+            _historyWindow?.OnImagesRefreshed(images);
 
             if (_config.IsPinned)
             {
@@ -296,7 +242,8 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex)
         {
             Logger.Error("Refresh cycle failed.", ex);
-            _titleItem.Text = "刷新失败，详见日志文件";
+            _menu.TitleRow.Caption = "刷新失败，详见日志文件";
+            _menu.TitleRow.Description = string.Empty;
             if (userInitiated)
             {
                 ErrorDialog.Show("刷新失败", Logger.Describe(ex));
@@ -543,13 +490,6 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Applies a history selection (called by HistoryForm). Picking a picture out of
-    /// the window is a deliberate choice, so it pins on its own - unlike stepping
-    /// through the list from the tray menu, which is just browsing.
-    /// </summary>
-    public Task ApplyFromHistoryAsync(int index) => MoveToAsync(index, pinAfterwards: true);
-
-    /// <summary>
     /// Whether <paramref name="path"/> is, as far as this program can tell, already
     /// the wallpaper - used to skip an apply that would change nothing.
     /// <para>
@@ -582,87 +522,64 @@ internal sealed class TrayContext : ApplicationContext
 
         if (_appliedImage is not null)
         {
-            _titleItem.Text = Truncate(_appliedImage.DisplayLine, 80);
-            _tray.Text = Truncate(prefix + _appliedImage.DisplayTitle, 63);
+            _menu.TitleRow.Description = _appliedImage.DisplayDate;
+            _menu.TitleRow.Caption = _appliedImage.DisplayTitle;
+            _tray.SetToolTip(Truncate(prefix + _appliedImage.DisplayTitle, 63));
         }
         else if (pinned && _appliedPath is not null)
         {
             // Pinned long enough to have left the eight day window: the file name is
             // all the metadata there is.
             string label = DescribeWallpaperFile(_config.PinnedWallpaper);
-            _titleItem.Text = label;
-            _tray.Text = Truncate(prefix + label, 63);
+            _menu.TitleRow.Description = string.Empty;
+            _menu.TitleRow.Caption = label;
+            _tray.SetToolTip(Truncate(prefix + label, 63));
         }
-        else if (!_busy)
+        else if (!_busy && _images.Count == 0)
         {
-            _titleItem.Text = _images.Count == 0 ? "尚未获取到壁纸信息" : _titleItem.Text;
+            _menu.TitleRow.Caption = "尚未获取到壁纸信息";
         }
 
         if (_busy)
         {
-            _titleItem.Text = "正在处理…";
+            _menu.TitleRow.Caption = "正在处理…";
         }
 
         // Clickable only when there is somewhere to go: no link, or a title that
         // currently says something else, means the row is just a caption.
-        _titleItem.Enabled = !_busy && !string.IsNullOrWhiteSpace(_appliedImage?.CopyrightLink);
+        _menu.TitleRow.IsEnabled = !_busy && !string.IsNullOrWhiteSpace(_appliedImage?.CopyrightLink);
 
         // _currentIndex == -1 means the wallpaper is not in the list at all: there is
         // a newer picture to go to, but nothing older.
-        _newerItem.Enabled = !_busy && _images.Count > 0 && _currentIndex != 0;
-        _olderItem.Enabled = !_busy && _currentIndex >= 0 && _currentIndex < _images.Count - 1;
-        _refreshItem.Enabled = !_busy;
-        _historyItem.Enabled = !_busy;
+        _menu.Newer.IsEnabled = !_busy && _images.Count > 0 && _currentIndex != 0;
+        _menu.Older.IsEnabled = !_busy && _currentIndex >= 0 && _currentIndex < _images.Count - 1;
+        _menu.Refresh.IsEnabled = !_busy;
+        _menu.History.IsEnabled = !_busy;
 
-        _pinItem.Checked = pinned;
-        _pinItem.Enabled = !_busy && (pinned || _appliedPath is not null);
+        _menu.Pin.IsChecked = pinned;
+        _menu.Pin.IsEnabled = !_busy && (pinned || _appliedPath is not null);
 
         // The picker paints the same state on a tile, and it can be open while this
         // runs - stepping through the list from the tray menu moves both badges.
-        _historyForm?.RefreshCurrentMarker();
-
-        // Every Enabled flag above was just recomputed, and the item colours follow
-        // them. Not ApplyToMenu: that also builds a renderer, which nothing here needs.
-        ThemeManager.RefreshMenuItemColors(_menu);
+        _historyWindow?.RefreshCurrentMarker();
     }
 
     private void ShowSettings()
     {
-        if (_settingsForm is null || _settingsForm.IsDisposed)
+        if (_settingsWindow is null)
         {
-            _settingsForm = new SettingsForm(_config);
-            _settingsForm.SettingsChanged += OnSettingsChanged;
+            _settingsWindow = new SettingsWindow(_config);
+            _settingsWindow.SettingsChanged += OnSettingsChanged;
         }
 
-        ShowForm(_settingsForm);
+        _settingsWindow.ShowOrActivate();
     }
 
     private void ShowHistory()
     {
-        if (_historyForm is null || _historyForm.IsDisposed)
-        {
-            _historyForm = new HistoryForm(this);
-        }
-
-        ShowForm(_historyForm);
-        _historyForm.LoadImages(_images);
-    }
-
-    private static void ShowForm(Form form)
-    {
-        if (!form.Visible)
-        {
-            form.Show();
-        }
-
-        if (form.WindowState == FormWindowState.Minimized)
-        {
-            form.WindowState = FormWindowState.Normal;
-        }
-
-        form.Activate();
-        form.BringToFront();
-        NativeMethods.SetForegroundWindow(form.Handle);
+        _historyWindow ??= new HistoryWindow(this);
+        _historyWindow.ShowOrActivate();
+        _historyWindow.LoadImages(_images);
     }
 
     private void OnSettingsChanged(object? sender, SettingsChangedEventArgs e)
@@ -695,7 +612,7 @@ internal sealed class TrayContext : ApplicationContext
 
             case SettingKind.Interval:
                 _timer.Stop();
-                _timer.Interval = GetIntervalMilliseconds();
+                _timer.Interval = GetInterval();
                 _timer.Start();
                 Logger.Info("Refresh timer set to " + _config.RefreshIntervalHours + " hour(s).");
                 break;
@@ -753,17 +670,21 @@ internal sealed class TrayContext : ApplicationContext
     private void ExitApplication()
     {
         Logger.Info("Exit requested from the tray menu.");
-        _tray.Visible = false;
-        ExitThread();
+        Dispose();
+
+        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
     }
 
-    private int GetIntervalMilliseconds()
+    private TimeSpan GetInterval()
     {
         int hours = AppConfig.Clamp(
             _config.RefreshIntervalHours,
             AppConfig.MinRefreshIntervalHours,
             AppConfig.MaxRefreshIntervalHours);
-        return hours * 60 * 60 * 1000;
+        return TimeSpan.FromHours(hours);
     }
 
     /// <summary>
@@ -782,44 +703,4 @@ internal sealed class TrayContext : ApplicationContext
 
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value.Substring(0, maxLength - 1) + "…";
-}
-
-/// <summary>
-/// Invisible top level window. It exists for two reasons: it receives the
-/// WM_SETTINGCHANGE broadcast used for live theme switching, and it gives the
-/// context something to marshal calls onto.
-/// </summary>
-internal sealed class HiddenWindow : Form
-{
-    public HiddenWindow()
-    {
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        StartPosition = FormStartPosition.Manual;
-        Location = new Point(-32000, -32000);
-        Size = new Size(1, 1);
-        Text = "BingWallpaper message window";
-
-        // Force handle creation: broadcasts and BeginInvoke both need a real HWND.
-        _ = Handle;
-    }
-
-    public event EventHandler? SystemColorSchemeChanged;
-
-    protected override void SetVisibleCore(bool value) => base.SetVisibleCore(false);
-
-    protected override void WndProc(ref Message m)
-    {
-        if (m.Msg == NativeMethods.WM_SETTINGCHANGE)
-        {
-            string? area = m.LParam != IntPtr.Zero ? Marshal.PtrToStringUni(m.LParam) : null;
-            if (string.Equals(area, "ImmersiveColorSet", StringComparison.Ordinal))
-            {
-                Logger.Debug("WM_SETTINGCHANGE/ImmersiveColorSet received.");
-                SystemColorSchemeChanged?.Invoke(this, EventArgs.Empty);
-            }
-        }
-
-        base.WndProc(ref m);
-    }
 }

@@ -11,7 +11,7 @@
     </security>
   </trustInfo>
 
-  <!-- Common Controls v6: without this every control falls back to the Windows 95 look. -->
+  <!-- Common Controls v6: the Win32 message box fallback and the tray tooltip use it. -->
   <dependency>
     <dependentAssembly>
       <assemblyIdentity
@@ -34,13 +34,12 @@
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <!--
-        System DPI awareness, not PerMonitorV2. Windows Forms on .NET Framework only
-        implements per-monitor scaling when an app.config switch is present, and we
-        want the program to stay a single file. System awareness plus
-        AutoScaleMode.Font scales correctly for the monitor the app starts on;
-        a second monitor with a different scaling factor is bitmap stretched by Windows.
+        Per monitor v2. Avalonia scales every window itself from the DPI of the
+        monitor it currently sits on, so a window dragged between a 100% and a 150%
+        display is laid out again instead of being bitmap stretched by Windows.
       -->
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
   </application>

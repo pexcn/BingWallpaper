@@ -3,24 +3,41 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <!--
-      .NET Framework 4.8 on purpose: it is the newest runtime that ships *inside*
-      Windows 10 (1903 and later, which includes LTSC 2021 / build 19044), so the
-      executable stays a couple of hundred KB and needs no runtime install.
-      No version of modern .NET (5 through 10) is part of Windows, which is why a
-      .NET 10 build either needs a runtime install or a ~47 MB self contained exe.
-      4.8.1 is not an option: it is only in-box on Windows 11 22H2 and later.
+      .NET 10 compiled ahead of time. Native AOT produces a self contained native
+      executable: no .NET runtime has to be installed, nothing is JIT compiled at
+      start, and the process starts in a few milliseconds.
+      The price is paid in bytes - see the size table in README.md - and in the two
+      native libraries Avalonia needs next to the executable (Skia and HarfBuzz),
+      which is why the release is a small zip instead of a bare .exe.
     -->
-    <TargetFramework>net48</TargetFramework>
-    <PlatformTarget>x64</PlatformTarget>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <!-- Runs the trim/AOT analyzers on every ordinary build, not only on publish. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Lets the project build (not publish) on a non Windows machine. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
-    <!-- No NuGet packages, so no binding redirects and no .exe.config are needed. -->
-    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
-    <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
     <DebugType>embedded</DebugType>
+    <!--
+      Globalization stays on. InvariantGlobalization would save a little, but the
+      program formats dates for a Chinese UI and reads a market code that is a
+      culture name; ICU is part of Windows since 1903, so nothing has to ship for it.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Avalonia's Win32 backend needs the built in COM interop (clipboard, drag and drop). -->
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- Exception messages are the diagnostic channel here, so the resource strings stay. -->
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <OptimizationPreference>Size</OptimizationPreference>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -34,31 +51,32 @@
     <NeutralLanguage>en-US</NeutralLanguage>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
     <!--
-      The same file twice: ApplicationIcon above puts it in the Win32 resources of
-      the executable (Explorer, task bar, Alt+Tab), this embeds it so the tray can
-      pick the frame that matches the current DPI. See UI/AppIcon.cs.
-      The logical name is spelled out instead of relying on the RootNamespace plus
-      folder convention.
+      Avalonia.Win32 and Avalonia.Skia rather than the Avalonia.Desktop meta package:
+      this program only ever runs on Windows, and Desktop would drag the X11 and
+      macOS backends plus a D-Bus client into the output.
     -->
-    <EmbeddedResource Include="Resources\app.ico">
-      <LogicalName>BingWallpaper.Resources.app.ico</LogicalName>
-    </EmbeddedResource>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Win32" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Skia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
   </ItemGroup>
 
   <ItemGroup>
     <!--
-      Framework assemblies that ship with Windows. System.Drawing, System.Core and
-      friends are referenced by the SDK already; these three are not.
-      System.Web.Extensions provides JavaScriptSerializer, which replaces
-      System.Text.Json (that one is not part of .NET Framework).
+      The same file twice: ApplicationIcon above puts it in the Win32 resources of
+      the executable (Explorer, task bar, Alt+Tab), this embeds it so the tray and
+      the window title bars can pick the frame that matches the current DPI.
+      See UI/AppIcon.cs. The logical name is spelled out instead of relying on the
+      RootNamespace plus folder convention.
     -->
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Net.Http" />
-    <Reference Include="System.Web.Extensions" />
+    <EmbeddedResource Include="Resources\app.ico">
+      <LogicalName>BingWallpaper.Resources.app.ico</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

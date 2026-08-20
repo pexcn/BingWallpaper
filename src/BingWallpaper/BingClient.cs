@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
+using Avalonia.Media.Imaging;
 
 namespace BingWallpaper;
 
@@ -40,21 +40,14 @@ internal sealed class BingClient : IDisposable
 
     public BingClient()
     {
-        // ServicePointManager.SecurityProtocol is deliberately left alone. Because the
-        // project targets .NET Framework 4.7 or later its default is SystemDefault,
-        // which lets SChannel negotiate the highest protocol the OS offers - TLS 1.3
-        // included. Assigning an explicit value (even "|= Tls12") opts out of that and
-        // would pin the client to the listed protocols forever.
-
-        HttpClientHandler handler = new HttpClientHandler
+        // No explicit SslProtocols: the default lets SChannel negotiate the highest
+        // protocol the OS offers, TLS 1.3 included. Naming protocols here would pin
+        // the client to that list forever.
+        SocketsHttpHandler handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = true,
+            AutomaticDecompression = DecompressionMethods.All,
         };
-
-        if (handler.SupportsAutomaticDecompression)
-        {
-            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-        }
 
         _http = new HttpClient(handler)
         {
@@ -124,49 +117,51 @@ internal sealed class BingClient : IDisposable
     }
 
     /// <summary>
-    /// Parses the HPImageArchive JSON payload. JavaScriptSerializer ships with
-    /// .NET Framework (System.Web.Extensions), so this stays dependency free -
-    /// System.Text.Json is not available here.
+    /// Parses the HPImageArchive payload with System.Text.Json. JsonDocument rather
+    /// than JsonSerializer: reading the handful of fields that matter out of the
+    /// document needs no model type, and therefore no reflection and no source
+    /// generator - which is what keeps this compatible with Native AOT.
     /// </summary>
     public static List<BingImageInfo> ParseImages(string json)
     {
         List<BingImageInfo> result = new List<BingImageInfo>();
 
-        JavaScriptSerializer serializer = new JavaScriptSerializer();
-        object? root = serializer.DeserializeObject(json);
-        if (!(root is Dictionary<string, object> map)
-            || !map.TryGetValue("images", out object imagesValue)
-            || !(imagesValue is object[] images))
+        using (JsonDocument document = JsonDocument.Parse(json))
         {
-            throw new InvalidDataException("Response does not contain an \"images\" array.");
-        }
-
-        foreach (object item in images)
-        {
-            if (!(item is Dictionary<string, object> entry))
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("images", out JsonElement images)
+                || images.ValueKind != JsonValueKind.Array)
             {
-                continue;
+                throw new InvalidDataException("Response does not contain an \"images\" array.");
             }
 
-            string urlBase = GetString(entry, "urlbase");
-            string startDate = GetString(entry, "startdate");
-            if (string.IsNullOrEmpty(urlBase) || string.IsNullOrEmpty(startDate))
+            foreach (JsonElement entry in images.EnumerateArray())
             {
-                Logger.Warn("Skipping response entry without urlbase/startdate.");
-                continue;
-            }
+                if (entry.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
 
-            result.Add(new BingImageInfo
-            {
-                StartDate = startDate,
-                FullStartDate = GetString(entry, "fullstartdate"),
-                EndDate = GetString(entry, "enddate"),
-                UrlBase = urlBase,
-                Title = GetString(entry, "title"),
-                Copyright = GetString(entry, "copyright"),
-                CopyrightLink = GetString(entry, "copyrightlink"),
-                Wp = GetBool(entry, "wp", true),
-            });
+                string urlBase = GetString(entry, "urlbase");
+                string startDate = GetString(entry, "startdate");
+                if (string.IsNullOrEmpty(urlBase) || string.IsNullOrEmpty(startDate))
+                {
+                    Logger.Warn("Skipping response entry without urlbase/startdate.");
+                    continue;
+                }
+
+                result.Add(new BingImageInfo
+                {
+                    StartDate = startDate,
+                    FullStartDate = GetString(entry, "fullstartdate"),
+                    EndDate = GetString(entry, "enddate"),
+                    UrlBase = urlBase,
+                    Title = GetString(entry, "title"),
+                    Copyright = GetString(entry, "copyright"),
+                    CopyrightLink = GetString(entry, "copyrightlink"),
+                    Wp = GetBool(entry, "wp", true),
+                });
+            }
         }
 
         if (result.Count == 0)
@@ -260,7 +255,11 @@ internal sealed class BingClient : IDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Decodes the file to prove the bytes really are an image.</summary>
+    /// <summary>
+    /// Decodes the file to prove the bytes really are an image. The decoder is
+    /// Skia, through Avalonia - the same one that later puts the thumbnail on the
+    /// screen, so "decodes here" and "displays there" cannot disagree.
+    /// </summary>
     public static bool TryValidateImage(string path, out int width, out int height, out string? error)
     {
         width = 0;
@@ -269,13 +268,10 @@ internal sealed class BingClient : IDisposable
         try
         {
             using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-            using (Image image = Image.FromStream(
-                stream,
-                useEmbeddedColorManagement: false,
-                validateImageData: true))
+            using (Bitmap bitmap = new Bitmap(stream))
             {
-                width = image.Width;
-                height = image.Height;
+                width = bitmap.PixelSize.Width;
+                height = bitmap.PixelSize.Height;
                 return width > 0 && height > 0;
             }
         }
@@ -297,8 +293,7 @@ internal sealed class BingClient : IDisposable
         _http.Dispose();
     }
 
-    /// <summary>Math.Clamp does not exist on .NET Framework.</summary>
-    private static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
+    private static int Clamp(int value, int min, int max) => Math.Clamp(value, min, max);
 
     private static async Task<T> RunWithRetryAsync<T>(
         Func<Task<T>> operation,
@@ -338,27 +333,25 @@ internal sealed class BingClient : IDisposable
             last);
     }
 
-    private static string GetString(Dictionary<string, object> entry, string name)
-        => entry.TryGetValue(name, out object value) && value is string text ? text : string.Empty;
+    private static string GetString(JsonElement entry, string name)
+        => entry.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
 
-    private static bool GetBool(Dictionary<string, object> entry, string name, bool fallback)
+    private static bool GetBool(JsonElement entry, string name, bool fallback)
     {
-        if (!entry.TryGetValue(name, out object value))
+        if (!entry.TryGetProperty(name, out JsonElement value))
         {
             return fallback;
         }
 
-        if (value is bool flag)
+        return value.ValueKind switch
         {
-            return flag;
-        }
-
-        if (value is int number)
-        {
-            return number != 0;
-        }
-
-        return fallback;
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number => value.TryGetInt32(out int number) && number != 0,
+            _ => fallback,
+        };
     }
 
     private static void DeleteQuietly(string path)
