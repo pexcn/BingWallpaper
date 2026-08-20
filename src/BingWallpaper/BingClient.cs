@@ -40,16 +40,11 @@ internal sealed class BingClient : IDisposable
 
     public BingClient()
     {
-        // .NET Framework defaults to the OS protocol list since 4.7, but a stale
-        // machine-wide setting would break TLS 1.2 - make sure it is enabled.
-        try
-        {
-            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-        }
-        catch (NotSupportedException ex)
-        {
-            Logger.Warn("Could not enable TLS 1.2 explicitly: " + ex.Message);
-        }
+        // ServicePointManager.SecurityProtocol is deliberately left alone. Because the
+        // project targets .NET Framework 4.7 or later its default is SystemDefault,
+        // which lets SChannel negotiate the highest protocol the OS offers - TLS 1.3
+        // included. Assigning an explicit value (even "|= Tls12") opts out of that and
+        // would pin the client to the listed protocols forever.
 
         HttpClientHandler handler = new HttpClientHandler
         {
