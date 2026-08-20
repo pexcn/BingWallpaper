@@ -273,7 +273,7 @@ internal sealed class TrayContext : ApplicationContext
             _titleItem.Text = "刷新失败，详见日志文件";
             if (userInitiated)
             {
-                ErrorDialog.Show("必应壁纸 - 刷新失败", Logger.Describe(ex));
+                ErrorDialog.Show("刷新失败", Logger.Describe(ex));
             }
         }
         finally
@@ -315,7 +315,7 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex)
         {
             Logger.Error("Could not switch the wallpaper.", ex);
-            ErrorDialog.Show("必应壁纸 - 切换壁纸失败", Logger.Describe(ex));
+            ErrorDialog.Show("切换壁纸失败", Logger.Describe(ex));
         }
         finally
         {

@@ -63,7 +63,7 @@ internal static class Program
                 "当前目录不可写：\r\n" + Paths.BaseDirectory + "\r\n\r\n" +
                 "原因：" + writeError + "\r\n\r\n" +
                 "请把程序移动到有写入权限的目录（例如用户目录或 U 盘）后重新运行。",
-                "必应壁纸 - 目录不可写",
+                "目录不可写",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return 2;
@@ -113,7 +113,7 @@ internal static class Program
         catch (Exception ex)
         {
             Logger.Error("Fatal error during startup.", ex);
-            ErrorDialog.Show("必应壁纸 - 启动失败", Logger.Describe(ex));
+            ErrorDialog.Show("启动失败", Logger.Describe(ex));
             return 1;
         }
         finally
@@ -240,14 +240,14 @@ internal static class Program
     private static void OnThreadException(object sender, ThreadExceptionEventArgs e)
     {
         Logger.Error("Unhandled UI thread exception.", e.Exception);
-        ErrorDialog.Show("必应壁纸 - 未处理的异常", Logger.Describe(e.Exception));
+        ErrorDialog.Show("未处理的异常", Logger.Describe(e.Exception));
     }
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         Exception? ex = e.ExceptionObject as Exception;
         Logger.Error("Unhandled AppDomain exception (terminating=" + e.IsTerminating + ").", ex ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown"));
-        ErrorDialog.Show("必应壁纸 - 未处理的异常", Logger.Describe(ex));
+        ErrorDialog.Show("未处理的异常", Logger.Describe(ex));
     }
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)

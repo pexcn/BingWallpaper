@@ -44,7 +44,7 @@ internal sealed class HistoryForm : Form
 
         ThemeManager.ApplySystemFont(this);
 
-        Text = "必应壁纸 - 选择日期";
+        Text = "选择日期";
         // Windows Forms does not inherit the icon of the executable: without this the
         // title bar and the task bar show the default .NET Framework window icon.
         Icon = AppIcon.Window;

@@ -519,7 +519,7 @@ internal sealed class SettingsForm : Form
         catch (Exception ex)
         {
             Logger.Error("Could not save the configuration file.", ex);
-            ErrorDialog.Show("必应壁纸 - 保存设置失败", Logger.Describe(ex));
+            ErrorDialog.Show("保存设置失败", Logger.Describe(ex));
             return;
         }
 
