@@ -115,14 +115,14 @@ internal sealed class ThemedRadioButton : RadioButton
 }
 
 /// <summary>
-/// Drop down list whose arrow button follows the palette.
+/// Drop down list whose arrow button and focused value follow the palette.
 ///
 /// ThemeManager switches every ComboBox to FlatStyle.Flat in the dark theme,
 /// because the themed control draws a light frame around its text. Flat in turn
 /// paints the arrow button as a light grey square with a black glyph, and no
 /// property recolours it. A ComboBox is a native window that ignores
-/// ControlStyles.UserPaint, so the button is painted over after the control has
-/// finished drawing itself.
+/// ControlStyles.UserPaint, so both the button and the value are painted over
+/// after the control has finished drawing itself.
 /// </summary>
 internal sealed class ThemedComboBox : ComboBox
 {
@@ -137,11 +137,25 @@ internal sealed class ThemedComboBox : ComboBox
 
         if (m.Msg == WM_PAINT && ThemeManager.Palette.IsDark)
         {
-            PaintArrow();
+            PaintOverlay();
         }
     }
 
-    private void PaintArrow()
+    protected override void OnGotFocus(EventArgs e)
+    {
+        // The value is painted differently with and without the focus, and the
+        // native control does not repaint the whole client area when it changes.
+        Invalidate();
+        base.OnGotFocus(e);
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnLostFocus(e);
+    }
+
+    private void PaintOverlay()
     {
         ThemePalette palette = ThemeManager.Palette;
         using Graphics g = Graphics.FromHwnd(Handle);
@@ -151,13 +165,35 @@ internal sealed class ThemedComboBox : ComboBox
         using (SolidBrush background = new(palette.ControlBackground))
         {
             g.FillRectangle(background, button);
+
+            // A DropDownList paints its value in the system highlight colours while
+            // it has the focus - a blue block behind white text, plus a dotted focus
+            // rectangle - and neither colour comes from the palette. The value is
+            // drawn again over the top; the focus shows as an accent border instead,
+            // which is also what the radio buttons and check boxes use.
+            if (Focused)
+            {
+                Rectangle text = new(1, 1, button.Left - 1, Height - 2);
+                g.FillRectangle(background, text);
+
+                // The inset the native control leaves in front of its text.
+                text.Inflate(-DpiScale.Round(2), 0);
+                TextRenderer.DrawText(
+                    g,
+                    Text,
+                    Font,
+                    text,
+                    Enabled ? palette.Text : palette.SecondaryText,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+            }
         }
 
         // Before the chevron, and with no anti aliasing: an anti aliased one pixel
         // rectangle only partly covers its corner pixels, and the flat border
         // underneath is drawn in SystemColors.ControlDark, which stays light in the
         // dark theme - so the corners came out as four bright dots.
-        using (Pen border = new(palette.Border))
+        using (Pen border = new(Focused ? palette.Accent : palette.Border))
         {
             g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
         }

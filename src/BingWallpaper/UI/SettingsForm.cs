@@ -107,11 +107,11 @@ internal sealed class SettingsForm : Form
     {
         base.OnVisibleChanged(e);
 
-        // A focused DropDownList paints its value in the system highlight colours,
-        // so the first drop down came up as a blue block - the window hands the
-        // focus to the first control in the tab order, which is the market box. The
-        // close button takes it instead; it is where the focus ends up anyway once
-        // the window has been closed once, which is why reopening looked correct.
+        // The window hands the focus to the first control in the tab order, which is
+        // the market drop down. The close button takes it instead: a focused drop
+        // down list answers the mouse wheel, so a stray scroll anywhere over the
+        // window would silently change a setting. How a focused drop down paints
+        // itself is ThemedComboBox's problem, not this one.
         if (Visible)
         {
             ActiveControl = _closeButton;
