@@ -55,36 +55,6 @@ jobs:
           Get-ChildItem publish -Recurse |
             ForEach-Object { "{0,-30} {1,10:N0} bytes" -f $_.Name, $_.Length }
 
-      - name: Self test
-        shell: pwsh
-        run: |
-          $publish = (Resolve-Path publish).Path
-          $exe = Join-Path $publish 'BingWallpaper.exe'
-          $log = Join-Path $publish 'BingWallpaper.log'
-          if (Test-Path $log) { Remove-Item $log -Force }
-          Write-Host "Running $exe --selftest"
-          # The executable is a GUI subsystem binary, so wait for it explicitly and
-          # read the exit code from the process object instead of $LASTEXITCODE.
-          $process = Start-Process -FilePath $exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
-          if (Test-Path $log) {
-            Write-Host '----- BingWallpaper.log -----'
-            Get-Content $log
-            Write-Host '-----------------------------'
-          } else {
-            Write-Host 'No log file was produced.'
-          }
-          if ($process.ExitCode -ne 0) {
-            Write-Error "Self test failed with exit code $($process.ExitCode)."
-            exit 1
-          }
-          Write-Host 'Self test passed.'
-
-      - name: Clean self test leftovers
-        shell: pwsh
-        run: |
-          Get-ChildItem publish -Include 'BingWallpaper.log','BingWallpaper.log.1' -Recurse |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:

@@ -88,7 +88,6 @@ internal sealed class AppConfig
     public void Save(string path)
     {
         StringBuilder sb = new StringBuilder();
-        sb.AppendLine("; BingWallpaper configuration - plain text, safe to edit by hand.");
         sb.AppendLine("[" + SectionName + "]");
         sb.AppendLine("Market=" + Market);
         sb.AppendLine("Resolution=" + ResolutionToString(Resolution));

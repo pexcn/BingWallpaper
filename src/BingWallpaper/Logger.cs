@@ -28,9 +28,6 @@ internal static class Logger
     private static string? _filePath;
     private static bool _fileDisabled;
 
-    /// <summary>When true every line is also written to stdout (used by --selftest).</summary>
-    public static bool EchoToConsole { get; set; }
-
     /// <summary>Set once at startup; a null path disables file logging.</summary>
     public static void Initialize(string? filePath)
     {
@@ -103,19 +100,6 @@ internal static class Logger
 
         lock (Sync)
         {
-            if (EchoToConsole)
-            {
-                try
-                {
-                    Console.Out.WriteLine(line);
-                    Console.Out.Flush();
-                }
-                catch
-                {
-                    // No console attached - ignore.
-                }
-            }
-
             if (_fileDisabled || _filePath is null)
             {
                 return;

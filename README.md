@@ -87,16 +87,7 @@ KeepDays=30                 ; 0 = 永久保留
 RunAtStartup=false
 ```
 
-### 命令行
-
-```
-BingWallpaper.exe                     # 正常启动（托盘）
-BingWallpaper.exe --selftest          # 无界面自检：拉取 API → 下载 → 解码，exit code 0/1
-BingWallpaper.exe --selftest --market=en-US --resolution=1080p
-BingWallpaper.exe --help
-```
-
-`--selftest` 不会设置壁纸、不建窗口、不写配置文件，用于 CI 与排障。
+程序不接受任何命令行参数：能配置的东西都在这个文件里。
 
 ---
 
@@ -161,8 +152,8 @@ dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish
 
 产物是单个 `publish\BingWallpaper.exe`，没有附带 DLL，也没有 `.exe.config`。
 
-CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建并运行 `--selftest`，
-且以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把 exe 挂到 GitHub Release 上
+CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建，
+并以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把 exe 挂到 GitHub Release 上
 （可直接 `curl -LO` 的公开直链），同时保留 artifact 上传。
 
 ## 技术说明

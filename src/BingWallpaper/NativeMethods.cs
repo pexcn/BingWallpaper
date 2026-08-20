@@ -22,23 +22,12 @@ internal static class NativeMethods
     /// <summary>WM_SETTINGCHANGE - broadcast when a system wide setting changes.</summary>
     public const int WM_SETTINGCHANGE = 0x001A;
 
-    /// <summary>Console handle of the parent process, for AttachConsole.</summary>
-    public const int ATTACH_PARENT_PROCESS = -1;
-
     /// <summary>
     /// user32!SystemParametersInfoW. Available since Windows 2000.
     /// </summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, string pvParam, uint fWinIni);
-
-    /// <summary>
-    /// kernel32!AttachConsole. Available since Windows XP. Used by --selftest so the
-    /// output of this GUI subsystem executable shows up in the calling console.
-    /// </summary>
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool AttachConsole(int dwProcessId);
 
     /// <summary>
     /// user32!GetDpiForSystem. Available since Windows 10 version 1607 (build 14393),

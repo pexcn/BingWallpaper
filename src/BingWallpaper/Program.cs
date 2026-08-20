@@ -1,7 +1,6 @@
 using System;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,28 +19,16 @@ internal static class Program
     private static EventWaitHandle? _activateEvent;
     private static TrayContext? _trayContext;
 
+    /// <summary>
+    /// The program takes no command line arguments: everything it can be told is in
+    /// BingWallpaper.ini next to the executable, and it is started from Explorer or
+    /// the Run key, never from a shell.
+    /// </summary>
     [STAThread]
-    private static int Main(string[] args)
-    {
-        if (HasSwitch(args, "--selftest"))
-        {
-            AttachConsoleIfPossible();
-            Logger.Initialize(Paths.IsBaseDirectoryWritable(out _) ? Paths.LogFile : null);
-            return SelfTest.RunAsync(args).GetAwaiter().GetResult();
-        }
-
-        if (HasSwitch(args, "--help") || HasSwitch(args, "-h") || HasSwitch(args, "/?"))
-        {
-            AttachConsoleIfPossible();
-            PrintUsage();
-            return 0;
-        }
-
-        return RunGui();
-    }
+    private static int Main() => RunGui();
 
     /// <summary>One line of environment information, written on every start.</summary>
-    public static void LogEnvironment()
+    private static void LogEnvironment()
     {
         string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
         bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
@@ -269,42 +256,4 @@ internal static class Program
         e.SetObserved();
     }
 
-    private static bool HasSwitch(string[] args, string name)
-        => args.Any(arg => string.Equals(arg, name, StringComparison.OrdinalIgnoreCase));
-
-    private static void PrintUsage()
-    {
-        Console.Out.WriteLine("BingWallpaper - unofficial Bing daily wallpaper client (portable).");
-        Console.Out.WriteLine();
-        Console.Out.WriteLine("Usage: BingWallpaper.exe [options]");
-        Console.Out.WriteLine("  (no options)            start in the notification area");
-        Console.Out.WriteLine("  --selftest              head-less API + download check, exit code 0/1");
-        Console.Out.WriteLine("      --market=zh-CN      override the market for the self test");
-        Console.Out.WriteLine("      --resolution=1080p  override the resolution for the self test (uhd|1080p)");
-        Console.Out.WriteLine("  --help                  show this text");
-        Console.Out.Flush();
-    }
-
-    /// <summary>
-    /// This is a GUI subsystem executable, so stdout is not connected by default.
-    /// Attaching to the parent console makes --selftest usable from cmd/PowerShell/CI.
-    /// </summary>
-    private static void AttachConsoleIfPossible()
-    {
-        try
-        {
-            if (!NativeMethods.AttachConsole(NativeMethods.ATTACH_PARENT_PROCESS))
-            {
-                return;
-            }
-
-            StreamWriter writer = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
-            Console.SetOut(writer);
-            Console.SetError(writer);
-        }
-        catch
-        {
-            // No console available (for example when launched from Explorer).
-        }
-    }
 }
