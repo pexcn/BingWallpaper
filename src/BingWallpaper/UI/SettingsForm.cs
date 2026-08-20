@@ -46,15 +46,15 @@ internal sealed class SettingsForm : Form
 
     private readonly AppConfig _config;
 
-    private readonly ComboBox _marketBox = new();
+    private readonly ThemedComboBox _marketBox = new();
     private readonly ThemedRadioButton _resolution4K = new("4K");
     private readonly ThemedRadioButton _resolution1080 = new("1080p");
-    private readonly ComboBox _fitBox = new();
+    private readonly ThemedComboBox _fitBox = new();
     private readonly ThemedRadioButton _themeSystem = new("跟随系统");
     private readonly ThemedRadioButton _themeLight = new("亮色");
     private readonly ThemedRadioButton _themeDark = new("暗色");
-    private readonly ComboBox _intervalBox = new();
-    private readonly ComboBox _keepDaysBox = new();
+    private readonly ThemedComboBox _intervalBox = new();
+    private readonly ThemedComboBox _keepDaysBox = new();
     // No caption: the row label carries it, like every other setting.
     private readonly ThemedCheckBox _startupBox = new(string.Empty);
     private readonly Button _closeButton = new();
@@ -129,8 +129,9 @@ internal sealed class SettingsForm : Form
             }
         }
 
-        // Room for the drop down button, the frame and the gap in front of the text.
-        int width = textWidth + SystemInformation.VerticalScrollBarWidth + DpiScale.Round(12);
+        // Room for the drop down button, the frame and the inset in front of the
+        // text. Kept tight on purpose: the longest entry is only "24 小时" wide.
+        int width = textWidth + SystemInformation.VerticalScrollBarWidth + DpiScale.Round(8);
 
         foreach (ComboBox box in boxes)
         {
@@ -179,13 +180,11 @@ internal sealed class SettingsForm : Form
         // Read only: a free text market code is a typo waiting to happen. A code that
         // is not in this list can still be set by editing the INI file, and
         // LoadFromConfig adds it to the list so it stays visible and selectable.
-        _marketBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _marketBox.Items.AddRange(Markets);
         AddRow(fields, "壁纸地区", _marketBox);
 
         AddRow(fields, "分辨率", CreateGroup(_resolution4K, _resolution1080));
 
-        _fitBox.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (WallpaperFit fit in (WallpaperFit[])Enum.GetValues(typeof(WallpaperFit)))
         {
             _fitBox.Items.Add(WallpaperService.GetFitDisplayName(fit));
@@ -198,7 +197,6 @@ internal sealed class SettingsForm : Form
         // Drop downs instead of NumericUpDown: the spinner buttons of a NumericUpDown
         // are painted by the Windows visual styles and stay light in the dark theme,
         // and carrying the unit in the item text removes the separate hint label.
-        _intervalBox.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (int hours in new[] { 1, 2, 3, 4, 6, 8, 12, 24 })
         {
             _intervalBox.Items.Add(new Choice(hours, FormatHours(hours)));
@@ -206,7 +204,6 @@ internal sealed class SettingsForm : Form
 
         AddRow(fields, "检查间隔", _intervalBox);
 
-        _keepDaysBox.DropDownStyle = ComboBoxStyle.DropDownList;
         foreach (int days in new[] { 0, 7, 14, 30, 60, 90, 180, 365 })
         {
             _keepDaysBox.Items.Add(new Choice(days, FormatDays(days)));
@@ -217,9 +214,12 @@ internal sealed class SettingsForm : Form
         AddRow(fields, "开机自启", _startupBox);
 
         _closeButton.Text = "关闭";
-        _closeButton.AutoSize = true;
-        _closeButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        _closeButton.Padding = new Padding(24, 5, 24, 5);
+        // A fixed size, not AutoSize: ThemeManager swaps FlatStyle between Standard
+        // and Flat with the palette, the two measure differently, and the dialog is
+        // sized once in OnLoad - so an auto sized button ends up clipped after a
+        // theme change. The value is in logical pixels; AutoScaleMode.Dpi scales it.
+        _closeButton.AutoSize = false;
+        _closeButton.Size = new Size(92, 30);
         _closeButton.Margin = new Padding(8, 0, 0, 0);
 
         FlowLayoutPanel buttons = new()

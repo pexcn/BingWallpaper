@@ -115,6 +115,67 @@ internal sealed class ThemedRadioButton : RadioButton
 }
 
 /// <summary>
+/// Drop down list whose arrow button follows the palette.
+///
+/// ThemeManager switches every ComboBox to FlatStyle.Flat in the dark theme,
+/// because the themed control draws a light frame around its text. Flat in turn
+/// paints the arrow button as a light grey square with a black glyph, and no
+/// property recolours it. A ComboBox is a native window that ignores
+/// ControlStyles.UserPaint, so the button is painted over after the control has
+/// finished drawing itself.
+/// </summary>
+internal sealed class ThemedComboBox : ComboBox
+{
+    /// <summary>WM_PAINT, winuser.h.</summary>
+    private const int WM_PAINT = 0x000F;
+
+    public ThemedComboBox() => DropDownStyle = ComboBoxStyle.DropDownList;
+
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+
+        if (m.Msg == WM_PAINT && ThemeManager.Palette.IsDark)
+        {
+            PaintArrow();
+        }
+    }
+
+    private void PaintArrow()
+    {
+        ThemePalette palette = ThemeManager.Palette;
+        using Graphics g = Graphics.FromHwnd(Handle);
+
+        int buttonWidth = SystemInformation.VerticalScrollBarWidth;
+        Rectangle button = new(Width - buttonWidth - 1, 1, buttonWidth, Height - 2);
+        using (SolidBrush background = new(palette.ControlBackground))
+        {
+            g.FillRectangle(background, button);
+        }
+
+        // A chevron, matching what the visual styles draw in the light palette.
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        int arm = DpiScale.Round(4);
+        int centreX = button.Left + (button.Width / 2);
+        int centreY = button.Top + (button.Height / 2) - (arm / 2);
+        using (Pen glyph = new(Enabled ? palette.Text : palette.SecondaryText, Math.Max(1, DpiScale.Round(1))))
+        {
+            g.DrawLines(glyph, new[]
+            {
+                new Point(centreX - arm, centreY),
+                new Point(centreX, centreY + arm),
+                new Point(centreX + arm, centreY),
+            });
+        }
+
+        using (Pen border = new(palette.Border))
+        {
+            g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+        }
+    }
+}
+
+/// <summary>
 /// One pixel horizontal rule.
 ///
 /// A plain Panel would do, except that ThemeManager paints every unrecognised
