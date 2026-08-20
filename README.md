@@ -18,16 +18,18 @@
 - WinUI 3（Windows App SDK）界面，Fluent 控件、圆角、亚克力质感，深浅色由 `ElementTheme` 统一切换，
   并可跟随系统实时变化；托盘菜单是原生 Win32 菜单，深色模式通过 uxtheme 补齐
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹 = 完整卸载
-- 除 Windows App SDK 外零第三方依赖，**免安装运行时**：.NET 与 Windows App SDK 都随程序打包
+- **Native AOT 编译**：`BingWallpaper.exe` 是一个 9.6 MB 的原生程序，不含 JIT、不含托管程序集，
+  启动不必再即时编译整个 XAML 栈
+- 除 Windows App SDK 外零第三方依赖，**免安装运行时**：.NET 编进 exe，Windows App SDK 随包附带
 
 ## 系统要求
 
 - Windows 10 2004（build 19041）及以上，64 位；**Windows 10 LTSC 2021（19044）满足要求**
-- **无需安装 .NET 运行时，也无需安装 Windows App SDK 运行时**：两者都随程序一起打包
+- **无需安装 .NET 运行时，也无需安装 Windows App SDK 运行时**：前者编译进了 exe，后者随包附带
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper-<版本>-win-x64.zip`（约 69 MB，解压后约 166 MB）
+1. 从 [Releases](../../releases) 下载 `BingWallpaper-<版本>-win-x64.zip`（约 27 MB，解压后约 64 MB）
 2. 解压到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
    - 压缩包里的文件要保持在一起：`BingWallpaper.exe` 需要同目录下的运行时文件，单独拷走 exe 无法启动
@@ -39,7 +41,8 @@
 
 | 方案 | 体积 | 是否需要安装运行时 |
 |---|---|---|
-| WinUI 3 + 自包含（本项目） | 166 MB / 449 个文件（压缩包 69 MB） | **否**，.NET 与 Windows App SDK 都在包内 |
+| WinUI 3 + Native AOT + 自包含（本项目） | exe 9.6 MB，整包约 64 MB（压缩包 27 MB） | **否**，.NET 在 exe 内，Windows App SDK 在包内 |
+| WinUI 3 + 自包含，不用 AOT | 166 MB | 否，同上 |
 | WinUI 3 + 依赖框架 | 数 MB | 是，需装 .NET Desktop Runtime **和** Windows App SDK 运行时 |
 | WinForms + .NET Framework 4.8（旧实现） | ~200 KB 单文件 | 否，Windows 10 1903+ 内置 |
 
@@ -47,9 +50,16 @@ Windows 里**没有任何一个版本内置现代 .NET 或 Windows App SDK**，�
 「体积」和「免安装」之间二选一。本项目选择免安装：便携性（拷贝即用、删除文件夹即卸载）
 是这个项目存在的理由之一，让用户先去装两个运行时不能接受。
 
-项目引用的是 `Microsoft.WindowsAppSDK.WinUI` 组件包而不是 `Microsoft.WindowsAppSDK` 元包：
-后者代表「整个 SDK」，会把 AI、ML、Search、Widgets 一并塞进发布目录——光 `onnxruntime.dll`
-和 `DirectML.dll` 就是 40 MB。只引用 WinUI 之后是 166 MB，元包则是 222 MB。
+两处把 166 MB 压到 64 MB 的取舍：
+
+- 引用 `Microsoft.WindowsAppSDK.WinUI` 组件包而不是 `Microsoft.WindowsAppSDK` 元包。后者代表
+  「整个 SDK」，会把 AI、ML、Search、Widgets 一并塞进发布目录——光 `onnxruntime.dll` 和
+  `DirectML.dll` 就是 40 MB。（元包：222 MB → 组件包：166 MB）
+- Native AOT。CoreCLR、JIT 和一整排托管程序集（仅 `Microsoft.Windows.SDK.NET.dll` 就 24 MB）
+  被换成一个 9.6 MB 的原生 exe。（166 MB → 64 MB）
+
+剩下的 55 MB 基本都是 Windows App SDK 自己的原生运行时（`Microsoft.ui.xaml.dll` 15 MB、
+`Microsoft.UI.Xaml.Controls.dll` 7 MB 等），那是 WinUI 的地板价。
 
 换来的是现代控件、原生高 DPI（PerMonitorV2）、系统一致的浅色/深色主题，
 以及不再需要为深色模式手写一整套自绘控件。
@@ -77,7 +87,7 @@ Windows 里**没有任何一个版本内置现代 .NET 或 Windows App SDK**，�
 ├─ BingWallpaper.exe
 ├─ BingWallpaper.ini        # 配置，纯文本可手改
 ├─ BingWallpaper.log        # 日志（512KB 轮转，保留一个 BingWallpaper.log.1）
-├─ Microsoft.WinUI.dll      # Windows App SDK / .NET 运行时文件（随包附带，勿删）
+├─ Microsoft.ui.xaml.dll    # Windows App SDK 运行时文件（随包附带，勿删）
 ├─ ...                      # 同上，其余运行时文件
 └─ wallpapers\
    └─ 20260818_WhyteCliffP_UHD.jpg
@@ -160,26 +170,33 @@ PinnedWallpaper=            ; 固定的壁纸文件名，留空 = 跟随检查�
 
 ## 构建
 
-需要 .NET 10 SDK 和 Windows（WinUI 3 的 XAML 编译器只在 Windows 上跑）：
+需要 Windows（WinUI 3 的 XAML 编译器只在 Windows 上跑）、.NET 10 SDK，以及 Visual Studio 的
+**「使用 C++ 的桌面开发」工作负载**——Native AOT 最后一步调用的是 MSVC 链接器：
 
 ```powershell
 dotnet build   src/BingWallpaper/BingWallpaper.csproj -c Release
 dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish
 ```
 
+`dotnet build` 仍然只做托管编译，很快；`dotnet publish` 会真正做 AOT 编译，需要几分钟。
 产物是整个 `publish\` 目录，`BingWallpaper.exe` 需要与其中的运行时文件放在一起。
+同目录下的 `BingWallpaper.pdb`（约 40 MB）是原生符号，不必随程序分发。
 
 CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建，
-并以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把打包好的 zip 挂到 GitHub Release 上，
-同时保留 artifact 上传。
+并以 `-warnaserror` 保证零编译警告；发布包里不含 PDB，符号单独作为一个 artifact 上传。
+打 `v*` 标签时把打包好的 zip 挂到 GitHub Release 上。
 
 ## 技术说明
 
 - C# + **WinUI 3 / Windows App SDK**（`net10.0-windows10.0.19041.0`），未打包（unpackaged）模式运行：
   没有 MSIX、没有安装程序、没有包标识，`WindowsPackageType=None` + `WindowsAppSDKSelfContained` +
   `SelfContained`，运行时全部随程序发布
-- 不启用 `PublishTrimmed` / `PublishAot`：XAML 运行时按名字解析类型，裁剪后的构建会在运行时以
-  编译期查不出来的方式失败，而体积本来就由两个运行时决定
+- **Native AOT**（`PublishAot`）：程序被编译成机器码，发布目录里没有 CoreCLR、没有 JIT、
+  也没有托管程序集。裁剪是 AOT 的一部分、无法关闭，`CsWinRTAotOptimizerEnabled=true`
+  负责让 WinRT 投影活过这一关；`IlcOptimizationPreference=Size` 因为这个程序大部分时间在等定时器
+- AOT 的硬约束是「运行时不能再生成代码」，代码里对应三处：XAML 绑定必须是编译期的 `x:Bind`
+  （反射式 `{Binding}` 一处都没有）；JSON 用 `JsonDocument` 逐字段读而不是反序列化；
+  托盘 interop 全部改成 blittable，细节见下条
 - 依赖只有一个：`Microsoft.WindowsAppSDK.WinUI`（连带 Base / Foundation / InteractiveExperiences），
   不引元包，因此发布目录里没有 AI / ML / Search / Widgets 的运行时；DWriteCore 也不需要——
   WinUI 链接的是系统自带的 `DWrite.dll`
@@ -188,6 +205,9 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   （`KeyboardAccelerator`）
 - **托盘图标与托盘菜单是纯 Win32**：WinUI 3 既没有托盘图标，也没有能脱离 XAML 窗口弹出的菜单，
   于是自己 `RegisterClassEx` + `Shell_NotifyIcon` + `CreatePopupMenu` / `TrackPopupMenuEx`。
+  这部分为 AOT 写成 unsafe：结构体是 blittable 的（`fixed char` 而不是 `ByValTStr`、`IntPtr`
+  而不是 `LPWStr`），大小取 `sizeof` 而不是 `Marshal.SizeOf`，窗口过程是
+  `[UnmanagedCallersOnly]` 函数指针而不是委托（后者还省掉了「委托被回收而系统仍持有指针」这类坑）。
   承载消息的窗口是一个隐藏的**顶层**窗口而不是 message-only 窗口——message-only 窗口收不到广播消息，
   而主题切换正是靠 `WM_SETTINGCHANGE` 广播感知的；同时监听 `TaskbarCreated`，资源管理器重启后自动补回图标
 - 深色模式：窗口内部由 `ElementTheme` 统一切换，标题栏用 `DwmSetWindowAttribute(20)`，
