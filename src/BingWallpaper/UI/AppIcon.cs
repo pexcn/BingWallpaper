@@ -13,9 +13,9 @@ namespace BingWallpaper.UI;
 ///
 /// Reading the embedded copy instead of calling Icon.ExtractAssociatedIcon is what
 /// keeps the tray sharp: that API only ever returns the 32x32 frame, while the
-/// notification area asks for 16, 20 or 24 device pixels depending on the DPI. A
-/// multi resolution file lets Windows Forms pick the frame that fits rather than
-/// squashing one bitmap into another size.
+/// notification area asks for 16, 20 or 24 device pixels depending on the DPI. The
+/// file carries a frame for each of those three, so Windows Forms picks the one
+/// that fits rather than squashing one bitmap into another size.
 /// </summary>
 internal static class AppIcon
 {
