@@ -11,7 +11,11 @@
     </security>
   </trustInfo>
 
-  <!-- Common Controls v6: without this every control falls back to the Windows 95 look. -->
+  <!--
+    Common Controls v6. WinUI draws its own controls and needs none of it, but the
+    tray menu is a real Win32 popup menu (see UI/TrayIcon.cs) and comctl32 v6 is
+    what gives it the modern metrics and the dark theme.
+  -->
   <dependency>
     <dependentAssembly>
       <assemblyIdentity
@@ -34,13 +38,13 @@
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <!--
-        System DPI awareness, not PerMonitorV2. Windows Forms on .NET Framework only
-        implements per-monitor scaling when an app.config switch is present, and we
-        want the program to stay a single file. System awareness plus
-        AutoScaleMode.Font scales correctly for the monitor the app starts on;
-        a second monitor with a different scaling factor is bitmap stretched by Windows.
+        PerMonitorV2, unlike the system awareness the Windows Forms version used:
+        WinUI 3 rescales its windows on a DPI change on its own, so there is no
+        reason to let Windows bitmap stretch them. The tray menu and the tray icon
+        follow through GetDpiForWindow / the icon frame that matches the DPI.
       -->
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
   </application>

@@ -4,69 +4,61 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 using BingWallpaper.Theme;
 using BingWallpaper.UI;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 
 namespace BingWallpaper;
 
-internal static class Program
+/// <summary>
+/// Startup, shutdown and the single instance guard.
+///
+/// The program takes no command line arguments: everything it can be told is in
+/// BingWallpaper.ini next to the executable, and it is started from Explorer or
+/// the Run key, never from a shell.
+/// </summary>
+public partial class App : Application
 {
     private const string SingleInstanceObject = "BingWallpaper.SingleInstance";
     private const string ActivateObject = "BingWallpaper.Activate";
 
-    private static Mutex? _instanceMutex;
-    private static EventWaitHandle? _activateEvent;
-    private static TrayContext? _trayContext;
+    private Mutex? _instanceMutex;
+    private EventWaitHandle? _activateEvent;
+    private AppController? _controller;
+    private DispatcherQueue? _dispatcher;
 
-    /// <summary>
-    /// The program takes no command line arguments: everything it can be told is in
-    /// BingWallpaper.ini next to the executable, and it is started from Explorer or
-    /// the Run key, never from a shell.
-    /// </summary>
-    [STAThread]
-    private static int Main() => RunGui();
-
-    /// <summary>One line of environment information, written on every start.</summary>
-    private static void LogEnvironment()
+    public App()
     {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
-        bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
-        Logger.Info(
-            "BingWallpaper " + version +
-            " | OS " + Environment.OSVersion.Version +
-            " (build " + Environment.OSVersion.Version.Build + ")" +
-            " | 64bit=" + Environment.Is64BitProcess +
-            " | DPI " + NativeMethods.GetSystemDpiSafe().ToString(CultureInfo.InvariantCulture) +
-            " | system theme " + (ThemeManager.IsSystemDark() ? "Dark" : "Light") +
-            " | dir " + Paths.BaseDirectory +
-            " | writable " + writable + (writable ? string.Empty : " (" + writeError + ")"));
+        InitializeComponent();
+
+        // There is no main window: the tray icon is the application. Without this,
+        // WinUI would end the process the moment the settings window is closed.
+        DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
+
+        // The exception hooks come first: a crash before this point would be invisible.
+        UnhandledException += OnXamlUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
     }
 
-    private static int RunGui()
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        // The exception hooks come first: a crash before this point would be invisible.
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += OnThreadException;
-        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
-        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
-
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
+        DispatcherQueue dispatcher = DispatcherQueue.GetForCurrentThread();
+        _dispatcher = dispatcher;
 
         // Portable by contract: no silent fallback to %LOCALAPPDATA%.
         if (!Paths.IsBaseDirectoryWritable(out string? writeError))
         {
             Logger.Initialize(null);
-            MessageBox.Show(
+            NativeMethods.ShowError(
+                "目录不可写",
                 "必应壁纸是一个便携程序，它的配置、日志和壁纸都保存在程序所在的文件夹里。\r\n\r\n" +
                 "当前目录不可写：\r\n" + Paths.BaseDirectory + "\r\n\r\n" +
                 "原因：" + writeError + "\r\n\r\n" +
-                "请把程序移动到有写入权限的目录（例如用户目录或 U 盘）后重新运行。",
-                "目录不可写",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-            return 2;
+                "请把程序移动到有写入权限的目录（例如用户目录或 U 盘）后重新运行。");
+            Environment.Exit(2);
+            return;
         }
 
         Logger.Initialize(Paths.LogFile);
@@ -76,7 +68,8 @@ internal static class Program
         if (!TryBecomePrimaryInstance())
         {
             Logger.Info("Another instance is already running; asked it to show its settings window.");
-            return 0;
+            Environment.Exit(0);
+            return;
         }
 
         try
@@ -105,22 +98,42 @@ internal static class Program
 
             Paths.EnsureWallpaperDirectory();
 
-            _trayContext = new TrayContext(config);
+            _controller = new AppController(config, dispatcher);
+            _controller.ExitRequested += (_, _) => Shutdown();
             StartActivationListener();
-            Application.Run(_trayContext);
-            Logger.Info("Message loop finished, exiting.");
-            return 0;
+            _controller.Start();
         }
         catch (Exception ex)
         {
             Logger.Error("Fatal error during startup.", ex);
-            ErrorDialog.Show("启动失败", Logger.Describe(ex));
-            return 1;
+            ErrorWindow.Show("启动失败", Logger.Describe(ex));
         }
-        finally
-        {
-            ReleaseSingleInstance();
-        }
+    }
+
+    /// <summary>One line of environment information, written on every start.</summary>
+    private static void LogEnvironment()
+    {
+        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+        bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
+        Logger.Info(
+            "BingWallpaper " + version +
+            " | OS " + Environment.OSVersion.Version +
+            " (build " + Environment.OSVersion.Version.Build + ")" +
+            " | 64bit=" + Environment.Is64BitProcess +
+            " | DPI " + NativeMethods.GetSystemDpiSafe().ToString(CultureInfo.InvariantCulture) +
+            " | system theme " + (ThemeManager.IsSystemDark() ? "Dark" : "Light") +
+            " | dir " + Paths.BaseDirectory +
+            " | writable " + writable + (writable ? string.Empty : " (" + writeError + ")"));
+    }
+
+    /// <summary>Tears everything down and ends the message loop.</summary>
+    private void Shutdown()
+    {
+        Logger.Info("Shutting down.");
+        _controller?.Dispose();
+        _controller = null;
+        ReleaseSingleInstance();
+        Exit();
     }
 
     /// <summary>
@@ -128,7 +141,7 @@ internal static class Program
     /// SeCreateGlobalPrivilege, which a standard user does not have, so the Local
     /// namespace is used as a fallback.
     /// </summary>
-    private static bool TryBecomePrimaryInstance()
+    private bool TryBecomePrimaryInstance()
     {
         foreach (string prefix in new[] { @"Global\", @"Local\" })
         {
@@ -184,11 +197,11 @@ internal static class Program
     }
 
     /// <summary>Waits for a second instance to ask for the settings window.</summary>
-    private static void StartActivationListener()
+    private void StartActivationListener()
     {
         EventWaitHandle? handle = _activateEvent;
-        TrayContext? context = _trayContext;
-        if (handle is null || context is null)
+        DispatcherQueue? dispatcher = _dispatcher;
+        if (handle is null || dispatcher is null)
         {
             return;
         }
@@ -200,7 +213,7 @@ internal static class Program
                 try
                 {
                     handle.WaitOne();
-                    context.RequestActivation();
+                    dispatcher.TryEnqueue(() => _controller?.ShowSettings());
                 }
                 catch (ObjectDisposedException)
                 {
@@ -220,11 +233,12 @@ internal static class Program
         thread.Start();
     }
 
-    private static void ReleaseSingleInstance()
+    private void ReleaseSingleInstance()
     {
         try
         {
             _activateEvent?.Dispose();
+            _activateEvent = null;
             if (_instanceMutex is not null)
             {
                 _instanceMutex.ReleaseMutex();
@@ -238,17 +252,22 @@ internal static class Program
         }
     }
 
-    private static void OnThreadException(object sender, ThreadExceptionEventArgs e)
+    private void OnXamlUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         Logger.Error("Unhandled UI thread exception.", e.Exception);
-        ErrorDialog.Show("未处理的异常", Logger.Describe(e.Exception));
+
+        // Handled, then shown: an unhandled exception in a XAML handler would
+        // otherwise take the tray icon down with it.
+        e.Handled = true;
+        ErrorWindow.Show("未处理的异常", Logger.Describe(e.Exception));
     }
 
-    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    private static void OnDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
     {
         Exception? ex = e.ExceptionObject as Exception;
-        Logger.Error("Unhandled AppDomain exception (terminating=" + e.IsTerminating + ").", ex ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown"));
-        ErrorDialog.Show("未处理的异常", Logger.Describe(ex));
+        Logger.Error(
+            "Unhandled AppDomain exception (terminating=" + e.IsTerminating + ").",
+            ex ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown"));
     }
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
@@ -256,5 +275,4 @@ internal static class Program
         Logger.Error("Unobserved task exception.", e.Exception);
         e.SetObserved();
     }
-
 }

@@ -1,6 +1,6 @@
 # BingWallpaper
 
-一个干净、便携、开源的 Bing 每日壁纸客户端（Windows / 单文件 / 托盘常驻）。
+一个干净、便携、开源的 Bing 每日壁纸客户端（Windows / WinUI 3 / 托盘常驻）。
 
 > 截图占位：`docs/screenshot-dark.png`（深色模式下的设置界面与托盘菜单）。
 > 首个构建产物在真机运行后补充。
@@ -15,38 +15,40 @@
 - 最近 8 天历史壁纸缩略图网格，一键切换；托盘菜单可直接上一张 / 下一张
 - 可固定某一张壁纸，不再随检查间隔自动更换，重启后依旧保持
 - 六种填充方式：填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨区
-- 手写深色模式，**在 Windows 10 上同样有效**（不依赖仅 Windows 11 可用的 `Application.SetColorMode`），可跟随系统实时切换
+- WinUI 3（Windows App SDK）界面，Fluent 控件、圆角、亚克力质感，深浅色由 `ElementTheme` 统一切换，
+  并可跟随系统实时变化；托盘菜单是原生 Win32 菜单，深色模式通过 uxtheme 补齐
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹 = 完整卸载
-- 零第三方依赖（仅 BCL + P/Invoke），**单个几百 KB 的 exe，无需安装任何运行时**
+- 除 Windows App SDK 外零第三方依赖，**免安装运行时**：.NET 与 Windows App SDK 都随程序打包
 
 ## 系统要求
 
-- Windows 10 1903（build 18362）及以上，64 位；**Windows 10 LTSC 2021（19044）满足要求**
-- **无需安装 .NET 运行时**：程序基于 .NET Framework 4.8，该版本自 Windows 10 1903 起随系统内置
+- Windows 10 2004（build 19041）及以上，64 位；**Windows 10 LTSC 2021（19044）满足要求**
+- **无需安装 .NET 运行时，也无需安装 Windows App SDK 运行时**：两者都随程序一起打包
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，约 200 KB）
-2. 放到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
+1. 从 [Releases](../../releases) 下载 `BingWallpaper-<版本>-win-x64.zip`
+2. 解压到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
-3. 双击运行，托盘出现图标后即开始工作
+   - 压缩包里的文件要保持在一起：`BingWallpaper.exe` 需要同目录下的运行时文件，单独拷走 exe 无法启动
+3. 双击 `BingWallpaper.exe`，托盘出现图标后即开始工作
 
-### 为什么用 .NET Framework 4.8 而不是 .NET 10？
+### 关于体积：WinUI 3 不再是一个单文件小程序
 
-因为要做到「体积小 **且** 免安装」，在 Windows 上只有这一条路：
+这一点必须说清楚。改用 WinUI 3 之后，「几百 KB 单文件」不再成立：
 
 | 方案 | 体积 | 是否需要安装运行时 |
 |---|---|---|
-| .NET Framework 4.8（本项目） | ~200 KB | **否**，Windows 10 1903+ 内置 |
-| .NET 10，依赖框架 | ~280 KB | 是，需装 .NET 10 Desktop Runtime |
-| .NET 10，自包含单文件 | ~47 MB | 否 |
+| WinUI 3 + 自包含（本项目） | 约 100 MB 级的文件夹 | **否**，.NET 与 Windows App SDK 都在包内 |
+| WinUI 3 + 依赖框架 | 数 MB | 是，需装 .NET Desktop Runtime **和** Windows App SDK 运行时 |
+| WinForms + .NET Framework 4.8（旧实现） | ~200 KB 单文件 | 否，Windows 10 1903+ 内置 |
 
-.NET 5 及以后（.NET Core 血统）**没有任何版本内置于 Windows**，所以「把 .NET 10 降到 .NET 8」并不能免安装。
-能免安装的最高版本就是 .NET Framework 4.8——4.8.1 只在 Windows 11 22H2+ 内置，Win10 上仍需手动安装。
-体积小的开源 Windows 工具（例如 shadowsocks-windows 4.x）走的也是同一条路。
+Windows 里**没有任何一个版本内置现代 .NET 或 Windows App SDK**，所以 WinUI 3 只能在
+「体积」和「免安装」之间二选一。本项目选择免安装：便携性（拷贝即用、删除文件夹即卸载）
+是这个项目存在的理由之一，让用户先去装两个运行时不能接受。
 
-代价是 .NET Framework 不再演进，且缺少一些现代 API；本项目相应地自己实现了 JSON 解析之外的
-兼容处理（见「技术说明」）。
+换来的是现代控件、原生高 DPI（PerMonitorV2）、系统一致的浅色/深色主题，
+以及不再需要为深色模式手写一整套自绘控件。
 
 托盘右键菜单：
 
@@ -71,9 +73,14 @@
 ├─ BingWallpaper.exe
 ├─ BingWallpaper.ini        # 配置，纯文本可手改
 ├─ BingWallpaper.log        # 日志（512KB 轮转，保留一个 BingWallpaper.log.1）
+├─ Microsoft.WinUI.dll      # Windows App SDK / .NET 运行时文件（随包附带，勿删）
+├─ ...                      # 同上，其余运行时文件
 └─ wallpapers\
    └─ 20260818_WhyteCliffP_UHD.jpg
 ```
+
+程序只写入 `BingWallpaper.ini`、`BingWallpaper.log(.1)` 和 `wallpapers\`，
+其余文件是运行时的一部分，升级时整个文件夹一起替换即可（`.ini` 和 `wallpapers\` 记得保留）。
 
 壁纸文件名是 `<日期>_<图片标识>_<分辨率>.jpg`，其中图片标识取自接口返回的 `OHR.` 标记，
 **跨市场相同**——同一张照片同时下发到 de-DE / en-IN / fr-FR 时，本地只会存一份，
@@ -149,49 +156,54 @@ PinnedWallpaper=            ; 固定的壁纸文件名，留空 = 跟随检查�
 
 ## 构建
 
-需要 .NET SDK（用于 `dotnet` 命令）与 .NET Framework 4.8 目标包（Visual Studio 或 Build Tools 自带）：
+需要 .NET 10 SDK 和 Windows（WinUI 3 的 XAML 编译器只在 Windows 上跑）：
 
 ```powershell
 dotnet build   src/BingWallpaper/BingWallpaper.csproj -c Release
 dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish
 ```
 
-产物是单个 `publish\BingWallpaper.exe`，没有附带 DLL，也没有 `.exe.config`。
+产物是整个 `publish\` 目录，`BingWallpaper.exe` 需要与其中的运行时文件放在一起。
 
 CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建，
-并以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把 exe 挂到 GitHub Release 上
-（可直接 `curl -LO` 的公开直链），同时保留 artifact 上传。
+并以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把打包好的 zip 挂到 GitHub Release 上，
+同时保留 artifact 上传。
 
 ## 技术说明
 
-- C# + WinForms（`net48`，C# 最新语言版本），UI 全部由代码构建，无窗体设计器、无 `.Designer.cs`
-- JSON 用 `JavaScriptSerializer`（`System.Web.Extensions`，随 .NET Framework 内置）解析，
-  因为 `System.Text.Json` 不属于 .NET Framework，而本项目不引入任何 NuGet 包
-- 按系统 DPI 感知（`dpiAware=true`）+ `AutoScaleMode.Dpi` 缩放；.NET Framework 的 WinForms 只有在
-  额外的 app.config 开关下才支持 PerMonitorV2，为保持单文件而放弃该特性（多显示器不同缩放时由系统拉伸）
-- 显式套用系统 UI 字体（`SystemFonts.MessageBoxFont`）：.NET Framework 的控件默认字体仍是
-  MS Sans Serif 8.25pt
+- C# + **WinUI 3 / Windows App SDK**（`net10.0-windows10.0.19041.0`），未打包（unpackaged）模式运行：
+  没有 MSIX、没有安装程序、没有包标识，`WindowsPackageType=None` + `WindowsAppSDKSelfContained` +
+  `SelfContained`，运行时全部随程序发布
+- 不启用 `PublishTrimmed` / `PublishAot`：XAML 运行时按名字解析类型，裁剪后的构建会在运行时以
+  编译期查不出来的方式失败，而体积本来就由两个运行时决定
+- 窗口用 XAML 描述、逻辑写在 code-behind 里，数据不走反射绑定：下拉框条目直接是 `ComboBoxItem`
+  （取值放在 `Tag` 里），只有历史网格的模板用了编译期绑定 `x:Bind`
+- **托盘图标与托盘菜单是纯 Win32**：WinUI 3 既没有托盘图标，也没有能脱离 XAML 窗口弹出的菜单，
+  于是自己 `RegisterClassEx` + `Shell_NotifyIcon` + `CreatePopupMenu` / `TrackPopupMenuEx`。
+  承载消息的窗口是一个隐藏的**顶层**窗口而不是 message-only 窗口——message-only 窗口收不到广播消息，
+  而主题切换正是靠 `WM_SETTINGCHANGE` 广播感知的；同时监听 `TaskbarCreated`，资源管理器重启后自动补回图标
+- 深色模式：窗口内部由 `ElementTheme` 统一切换，标题栏用 `DwmSetWindowAttribute(20)`，
+  托盘菜单用 uxtheme 未文档化序号导出（`SetPreferredAppMode` #135 / `AllowDarkModeForWindow` #133 /
+  `RefreshImmersiveColorPolicyState` #104 / `FlushMenuThemes` #136）。所有未文档化调用均包在 try/catch 中，
+  失败时降级为浅色并记录日志
+- JSON 用 `System.Text.Json` 的 `JsonDocument` 逐字段读取，不做反射反序列化
+- 下载校验不再依赖 `System.Drawing`（现代 .NET 里它已不属于框架）：改为直接读 JPEG/PNG 的标记段，
+  确认起始标记、帧头尺寸与结尾标记 `FF D9` / `IEND` 都在，半截文件因此不会被当成有效缓存
 - 图标是一个多分辨率 `.ico`（256/128/64/48/32/24/20/16），同一个文件既由 `ApplicationIcon` 编进 exe 的
-  Win32 资源（资源管理器、任务栏、Alt+Tab），也作为嵌入资源打包：托盘按当前 DPI 要 16/20/24 像素，而
-  `Icon.ExtractAssociatedIcon` 只会给出 32×32；窗口图标同样要显式赋值，WinForms 不继承 exe 图标
+  Win32 资源（资源管理器、任务栏、Alt+Tab），也由 `LoadImage` 按当前 DPI 取出对应帧给托盘和窗口标题栏使用
 - 16/20/24 三帧是从 128 帧重采样生成的，不是逐级均值缩小：均值缩小出来的小帧笔画落在半像素上，
   标题栏和托盘里看着发虚
-- 深色模式手写实现：读取 `AppsUseLightTheme` 注册表值（只读）、监听 `WM_SETTINGCHANGE`/`ImmersiveColorSet`、
-  `DwmSetWindowAttribute(20)` 深色标题栏、`SetWindowTheme` + uxtheme 未文档化序号导出（#135 / #133 / #104）。
-  所有未文档化调用均包在 try/catch 中，失败时降级为浅色并记录日志
+- 没有主窗口：`DispatcherShutdownMode = OnExplicitShutdown`，否则关掉设置窗口就等于退出程序
+- 按 PerMonitorV2 感知（见 `app.manifest`），WinUI 自己处理跨显示器缩放，不再需要手写 DPI 换算
 - 图片身份使用接口返回的 `startdate` 而非本地日期（zh-CN 市场在 UTC 16:00 换图）
 - 缓存文件名不含市场代码：市场描述的是「从哪个频道拿到这张图」，不是图片本身的属性。
   身份取 `urlbase` 里的 `OHR.<名称>` 标记（`/th?id=OHR.WhyteCliffP_ZH-CN0573407830` → `WhyteCliffP`），
   它跨市场稳定，于是反复切换市场不会把同一张照片存成好几份
 - 切换分辨率后，同一张图的旧尺寸副本会被清掉——但**只在当前分辨率那份确实存在时**才删，
   所以这一步只会去掉多余副本，永远不会删掉某张图的最后一份
-- 下载先写 `.tmp`、解码校验通过后再原子改名，避免半截文件被当作有效缓存
-- 全局异常钩子（`Application.ThreadException`、`AppDomain.UnhandledException`、`TaskScheduler.UnobservedTaskException`）
-  会把完整异常链写入日志并弹出可复制文本的错误对话框
-- 单选框 / 复选框为自绘控件：系统绘制的字形在深色背景下会变成「黑底黑点」，自绘后选中态在两种主题下
-  都是强调色蓝
-- 全球化功能保持启用：曾经开启的 `InvariantGlobalization`（.NET 10 时期）会让 WinForms 在切换输入法
-  （`WM_INPUTLANGCHANGE` → `CultureInfo.GetCultureInfo(lcid)`）时直接崩溃
+- 下载先写 `.tmp`、校验通过后再原子改名，避免半截文件被当作有效缓存
+- 全局异常钩子（`Application.UnhandledException`、`AppDomain.UnhandledException`、
+  `TaskScheduler.UnobservedTaskException`）会把完整异常链写入日志，并弹出可复制文本的错误窗口
 
 ## 免责声明
 

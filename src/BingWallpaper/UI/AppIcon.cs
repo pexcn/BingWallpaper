@@ -1,101 +1,139 @@
 using System;
-using System.Drawing;
-using System.IO;
-using System.Reflection;
-using System.Windows.Forms;
+using System.Runtime.InteropServices;
 
 namespace BingWallpaper.UI;
 
 /// <summary>
-/// The application icon. The same .ico is both the Win32 icon of the executable
-/// (ApplicationIcon in the project file, which is what Explorer and the task bar
-/// read) and an embedded resource, which is what this class hands out.
+/// The application icon, as an HICON.
 ///
-/// Reading the embedded copy instead of calling Icon.ExtractAssociatedIcon is what
-/// keeps the tray sharp: that API only ever returns the 32x32 frame, while the
-/// notification area asks for 16, 20 or 24 device pixels depending on the DPI. The
-/// file carries a frame for each of those three, so Windows Forms picks the one
-/// that fits rather than squashing one bitmap into another size.
+/// The same .ico is both the Win32 icon of the executable (ApplicationIcon in the
+/// project file, which is what Explorer and the task bar read) and, through this
+/// class, the icon of the tray entry and of every window title bar.
+///
+/// It is loaded out of the executable's own resources at the exact size that is
+/// being asked for, so Windows picks the frame that matches instead of squashing
+/// the 32x32 one into 16 or 20 pixels: the file carries a frame for each of
+/// 256/128/64/48/32/24/20/16.
 /// </summary>
 internal static class AppIcon
 {
     /// <summary>
-    /// Assembly qualified name of the embedded icon. Set explicitly in the project
-    /// file as well, so this string does not depend on any naming convention.
+    /// Resource id of the icon group the C# compiler writes when /win32icon is used -
+    /// which is what the ApplicationIcon project property turns into. It is the same
+    /// numeric value as IDI_APPLICATION, but in the module's own resources.
     /// </summary>
-    private const string ResourceName = "BingWallpaper.Resources.app.ico";
+    private static readonly IntPtr ApplicationIconResource = new IntPtr(32512);
 
-    private static readonly Icon? Source = LoadSource();
+    private const uint IMAGE_ICON = 1;
+    private const uint LR_DEFAULTCOLOR = 0;
+    private const uint LR_DEFAULTSIZE = 0x00000040;
+    private const int SM_CXICON = 11;
+    private const int SM_CXSMICON = 49;
 
-    /// <summary>
-    /// Icon for a window. The whole multi frame icon is handed over on purpose:
-    /// Windows Forms takes the small frame for the title bar and the large one for
-    /// the task bar entry.
-    /// </summary>
-    public static Icon Window { get; } = Source ?? Fallback();
+    /// <summary>Icon for the notification area, sized for the given DPI.</summary>
+    public static IntPtr LoadTrayIcon(uint dpi) => Load(GetMetric(SM_CXSMICON, dpi));
 
-    /// <summary>Icon for the notification area, at the DPI of the current session.</summary>
-    public static Icon Tray { get; } = LoadTray();
+    /// <summary>Icon for a window: the title bar takes the small frame out of it.</summary>
+    public static IntPtr LoadWindowIcon(uint dpi) => Load(GetMetric(SM_CXICON, dpi));
 
-    private static Icon? LoadSource()
+    public static void Destroy(IntPtr icon)
     {
+        if (icon == IntPtr.Zero)
+        {
+            return;
+        }
+
         try
         {
-            using Stream? stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourceName);
-            if (stream is null)
-            {
-                Logger.Warn("The application icon is not embedded in the assembly: " + ResourceName);
-                return null;
-            }
-
-            return new Icon(stream);
+            DestroyIcon(icon);
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not read the embedded application icon: " + ex.Message);
-            return null;
+            Logger.Debug("DestroyIcon failed: " + ex.Message);
         }
     }
 
-    private static Icon LoadTray()
-    {
-        Icon? source = Source;
-        if (source is null)
-        {
-            return Window;
-        }
-
-        Size size = SystemInformation.SmallIconSize;
-        try
-        {
-            return new Icon(source, size);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn("Could not pick the " + size.Width + "px frame of the application icon: " + ex.Message);
-            return source;
-        }
-    }
-
-    /// <summary>
-    /// Only reached if the embedded resource is gone: ask the shell for the icon of
-    /// the executable, and settle for the generic one if even that fails.
-    /// </summary>
-    private static Icon Fallback()
+    private static IntPtr Load(int size)
     {
         try
         {
-            Icon? icon = Icon.ExtractAssociatedIcon(Paths.ExecutablePath);
-            if (icon is not null)
+            IntPtr module = GetModuleHandleW(null);
+            IntPtr icon = LoadImageW(module, ApplicationIconResource, IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+            if (icon != IntPtr.Zero)
             {
                 return icon;
             }
+
+            Logger.Warn("The executable carries no icon resource, falling back to ExtractIconEx.");
+            IntPtr large = IntPtr.Zero;
+            IntPtr small = IntPtr.Zero;
+            if (ExtractIconExW(Paths.ExecutablePath, 0, ref large, ref small, 1) > 0)
+            {
+                // Whichever of the two is closer to the requested size; the other one
+                // is not needed and would leak.
+                bool wantSmall = size <= 24;
+                IntPtr wanted = wantSmall ? small : large;
+                Destroy(wantSmall ? large : small);
+                if (wanted != IntPtr.Zero)
+                {
+                    return wanted;
+                }
+            }
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not extract the application icon: " + ex.Message);
+            Logger.Warn("Could not load the application icon: " + ex.Message);
         }
 
-        return SystemIcons.Application;
+        // Last resort: the generic application icon, so the tray entry is at least
+        // visible and clickable.
+        try
+        {
+            return LoadImageW(IntPtr.Zero, ApplicationIconResource, IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("Could not load the generic application icon either: " + ex.Message);
+            return IntPtr.Zero;
+        }
     }
+
+    /// <summary>
+    /// The icon size Windows wants at this DPI. GetSystemMetricsForDpi exists since
+    /// Windows 10 1607; the plain GetSystemMetrics behind it answers for the system
+    /// DPI, which is the wrong answer on a monitor with its own scaling factor.
+    /// </summary>
+    private static int GetMetric(int index, uint dpi)
+    {
+        try
+        {
+            int value = GetSystemMetricsForDpi(index, dpi == 0 ? 96u : dpi);
+            if (value > 0)
+            {
+                return value;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("GetSystemMetricsForDpi failed: " + ex.Message);
+        }
+
+        return index == SM_CXSMICON ? 16 : 32;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandleW(string? moduleName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadImageW(IntPtr instance, IntPtr name, uint type, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(IntPtr icon);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetSystemMetricsForDpi(int index, uint dpi);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint ExtractIconExW(string file, int iconIndex, ref IntPtr large, ref IntPtr small, uint icons);
 }

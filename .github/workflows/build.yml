@@ -44,34 +44,47 @@ jobs:
       - name: Build
         run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -warnaserror -p:Version=${{ steps.version.outputs.value }}
 
-      # .NET Framework 4.8 ships with Windows 10 1903+, so the published output is
-      # just the executable - no runtime to bundle, nothing to install.
+      # Self contained twice over: the .NET runtime and the Windows App SDK runtime
+      # both end up in the publish folder, so the target machine needs no installer.
+      # The whole folder is the application - see the README.
       - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
-      - name: Report published files
+      - name: Report published size
         shell: pwsh
         run: |
-          Get-ChildItem publish -Recurse |
-            ForEach-Object { "{0,-30} {1,10:N0} bytes" -f $_.Name, $_.Length }
+          $files = Get-ChildItem publish -Recurse -File
+          $total = ($files | Measure-Object Length -Sum).Sum
+          "{0} files, {1:N1} MB total" -f $files.Count, ($total / 1MB)
+          $files | Sort-Object Length -Descending | Select-Object -First 15 |
+            ForEach-Object { "{0,-52} {1,10:N0} bytes" -f $_.Name, $_.Length }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "BingWallpaper-${{ steps.version.outputs.value }}-win-x64"
+          Compress-Archive -Path publish/* -DestinationPath "$name.zip" -CompressionLevel Optimal
+          "zip=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        id: package
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: BingWallpaper
-          path: publish/BingWallpaper.exe
+          name: BingWallpaper-win-x64
+          path: ${{ steps.package.outputs.zip }}
           if-no-files-found: error
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          files: publish/BingWallpaper.exe
+          files: ${{ steps.package.outputs.zip }}
           generate_release_notes: true
           body: |
             BingWallpaper ${{ steps.version.outputs.value }}
 
-            单个 exe，几百 KB，**无需安装任何运行时**：使用 .NET Framework 4.8，
-            它随 Windows 10 1903 及以上版本（含 LTSC 2021）内置。
+            WinUI 3（Windows App SDK）版本，**无需安装任何运行时**：.NET 与 Windows App SDK
+            都已随程序打包（self-contained + WindowsAppSDKSelfContained）。
 
-            放到一个有写入权限的目录后直接运行即可，配置、日志与壁纸都保存在程序所在目录。
+            解压到一个有写入权限的目录后运行 `BingWallpaper.exe` 即可，配置、日志与壁纸都保存在
+            程序所在目录。压缩包里的文件请保持在一起，不要只把 exe 单独拷走。

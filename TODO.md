@@ -155,24 +155,21 @@
 - 当前壁纸项下面加一条「★ 收藏当前壁纸 / 取消收藏」切换项。菜单里已经有一个「固定当前壁纸」
   勾选项，两者含义不同（一个管显示什么，一个管保留什么），措辞和位置都要让人一眼分得开。
 
-### 壁纸选择窗口（原 HistoryForm）
+### 壁纸选择窗口（HistoryWindow）
 
 顶部两个 tab：「**最近**」「**收藏**」。
 
-**不要用 WinForms 的 `TabControl`。** 它是深色模式的老大难：即使 `DrawMode = OwnerDrawFixed`
-能自绘标签项，标签条背景和页面边框仍由 comctl32 按系统主题绘制，深色下会露出浅色条；
-`SetWindowTheme("", "")` 关掉主题又退回 Win95 外观。
-
-**推荐做法**：顶部一个**自绘分段控件**（两个互斥 toggle 按钮，选中态用强调色蓝，与项目已有
-的自绘单选 / 复选框同一套画法），下方一个 `Panel` 切换内容。可控、零主题坑、风格统一。
-别忘了键盘可达性：Left/Right 切换 + 焦点框。
+界面已经是 WinUI 3，深色模式不再是自绘问题：用 `SelectorBar`（或 `NavigationView`
+的 `PaneDisplayMode="Top"`）加一个 `Frame` / 两个 `GridView` 切换内容即可，主题、焦点框和
+键盘可达性都由控件自己负责。
 
 **内容区**：
 
 - 「最近」= 现有的最近 8 天缩略图网格，行为不变。
 - 「收藏」= 同样的网格，按日期倒序（`source: "user"` 的按 `addedAt` 排），纵向滚动。
-- `ThumbnailTile` 右上角加星标叠加，点击即切换收藏；右键菜单：设为壁纸 / 取消收藏 / 打开
-  版权链接 / 在资源管理器中显示。`source: "user"` 的条目标题显示文件名、版权链接项禁用。
+- 网格的 `DataTemplate` 右上角加星标叠加（与现有的「当前 / 已固定」徽标同一处），点击即切换收藏；
+  用 `MenuFlyout` 做右键菜单：设为壁纸 / 取消收藏 / 打开版权链接 / 在资源管理器中显示。
+  `source: "user"` 的条目标题显示文件名、版权链接项禁用。
 - 收藏 tab 底部显示「共 N 张，占用 X MB」——不主动清理，但给用户判断的依据（一年 4K 约 1–2 GB）。
 
 ### 明确不做
@@ -228,9 +225,9 @@
 - **新增** `UI/ThumbnailCache.cs`——缩略图生成与缓存。
 - `Paths.cs`——`daily\` / `favorites\` / `.thumbs\` 常量。
 - `WallpaperService.cs`——路径解析顺序、清理器只扫 `daily\`（保护参数已经是集合，不必再动签名）。
-- `UI/HistoryForm.cs`——分段控件 + 双视图（可考虑连类名一起改成 `PickerForm`）。
-- `UI/ThumbnailTile.cs`——星标叠加、右键菜单、占位态。
-- `UI/TrayContext.cs`——菜单项改名、收藏切换项。
+- `UI/HistoryWindow.xaml(.cs)`——分段切换 + 双视图（可考虑连类名一起改成 `PickerWindow`）。
+- `UI/HistoryItem.cs`——星标状态、右键菜单命令、占位态。
+- `UI/TrayIcon.cs` 与 `UI/AppController.cs`——菜单项改名、收藏切换项。
 - `README.md`——「目录布局」改成新结构；「本程序改动了什么」表里加 `wallpapers\daily\`、
   `wallpapers\favorites\`、`favorites.json`，写明**程序永不删除 favorites 下的图片文件
   （`.thumbs\` 缓存除外）**；特性列表加一条收藏夹。

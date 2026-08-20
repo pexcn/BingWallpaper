@@ -1,14 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
 
 namespace BingWallpaper;
 
@@ -40,21 +39,14 @@ internal sealed class BingClient : IDisposable
 
     public BingClient()
     {
-        // ServicePointManager.SecurityProtocol is deliberately left alone. Because the
-        // project targets .NET Framework 4.7 or later its default is SystemDefault,
-        // which lets SChannel negotiate the highest protocol the OS offers - TLS 1.3
-        // included. Assigning an explicit value (even "|= Tls12") opts out of that and
-        // would pin the client to the listed protocols forever.
-
+        // The TLS protocol version is left to the OS on purpose: SslProtocols.None
+        // (the default) means "let SChannel negotiate", which picks up TLS 1.3 and
+        // whatever comes after it without a code change.
         HttpClientHandler handler = new HttpClientHandler
         {
             AllowAutoRedirect = true,
+            AutomaticDecompression = DecompressionMethods.All,
         };
-
-        if (handler.SupportsAutomaticDecompression)
-        {
-            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-        }
 
         _http = new HttpClient(handler)
         {
@@ -75,8 +67,8 @@ internal sealed class BingClient : IDisposable
         int count,
         CancellationToken cancellationToken)
     {
-        int safeIdx = Clamp(idx, 0, MaxImageCount - 1);
-        int safeCount = Clamp(count, 1, MaxImageCount);
+        int safeIdx = Math.Clamp(idx, 0, MaxImageCount - 1);
+        int safeCount = Math.Clamp(count, 1, MaxImageCount);
         string url = string.Format(
             CultureInfo.InvariantCulture,
             "{0}?format=js&idx={1}&n={2}&uhd=1&setmkt={3}&ensearch=1",
@@ -96,7 +88,7 @@ internal sealed class BingClient : IDisposable
                 {
                     Logger.Info("API response: HTTP " + (int)response.StatusCode + " " + response.StatusCode);
                     response.EnsureSuccessStatusCode();
-                    return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 }
             },
             "fetch image metadata",
@@ -124,26 +116,26 @@ internal sealed class BingClient : IDisposable
     }
 
     /// <summary>
-    /// Parses the HPImageArchive JSON payload. JavaScriptSerializer ships with
-    /// .NET Framework (System.Web.Extensions), so this stays dependency free -
-    /// System.Text.Json is not available here.
+    /// Parses the HPImageArchive JSON payload. Reading the document element by
+    /// element rather than deserializing into a type keeps this free of reflection,
+    /// so no serializer context has to be generated and nothing here depends on
+    /// property names surviving a trimming pass.
     /// </summary>
     public static List<BingImageInfo> ParseImages(string json)
     {
         List<BingImageInfo> result = new List<BingImageInfo>();
 
-        JavaScriptSerializer serializer = new JavaScriptSerializer();
-        object? root = serializer.DeserializeObject(json);
-        if (!(root is Dictionary<string, object> map)
-            || !map.TryGetValue("images", out object imagesValue)
-            || !(imagesValue is object[] images))
+        using JsonDocument document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("images", out JsonElement images)
+            || images.ValueKind != JsonValueKind.Array)
         {
             throw new InvalidDataException("Response does not contain an \"images\" array.");
         }
 
-        foreach (object item in images)
+        foreach (JsonElement entry in images.EnumerateArray())
         {
-            if (!(item is Dictionary<string, object> entry))
+            if (entry.ValueKind != JsonValueKind.Object)
             {
                 continue;
             }
@@ -204,7 +196,7 @@ internal sealed class BingClient : IDisposable
                     Logger.Info("  HTTP " + (int)response.StatusCode + " " + response.StatusCode);
                     response.EnsureSuccessStatusCode();
 
-                    using (Stream source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    using (Stream source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
                     using (FileStream target = new FileStream(
                         tempPath,
                         FileMode.Create,
@@ -223,7 +215,7 @@ internal sealed class BingClient : IDisposable
                 int width;
                 int height;
                 string? error;
-                if (!TryValidateImage(tempPath, out width, out height, out error))
+                if (!ImageProbe.TryValidate(tempPath, out width, out height, out error))
                 {
                     DeleteQuietly(tempPath);
                     throw new InvalidDataException("Downloaded file is not a decodable image: " + error);
@@ -231,7 +223,7 @@ internal sealed class BingClient : IDisposable
 
                 Logger.Info(
                     "  downloaded " + length + " bytes in " + stopwatch.ElapsedMilliseconds +
-                    " ms, decoded " + width + "x" + height);
+                    " ms, header says " + width + "x" + height);
 
                 Paths.MoveOverwrite(tempPath, destinationPath);
                 return length;
@@ -253,37 +245,11 @@ internal sealed class BingClient : IDisposable
                     .ConfigureAwait(false))
                 {
                     response.EnsureSuccessStatusCode();
-                    return await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                    return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
                 }
             },
             "download thumbnail",
             cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Decodes the file to prove the bytes really are an image.</summary>
-    public static bool TryValidateImage(string path, out int width, out int height, out string? error)
-    {
-        width = 0;
-        height = 0;
-        error = null;
-        try
-        {
-            using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-            using (Image image = Image.FromStream(
-                stream,
-                useEmbeddedColorManagement: false,
-                validateImageData: true))
-            {
-                width = image.Width;
-                height = image.Height;
-                return width > 0 && height > 0;
-            }
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
     }
 
     public void Dispose()
@@ -296,9 +262,6 @@ internal sealed class BingClient : IDisposable
         _disposed = true;
         _http.Dispose();
     }
-
-    /// <summary>Math.Clamp does not exist on .NET Framework.</summary>
-    private static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
 
     private static async Task<T> RunWithRetryAsync<T>(
         Func<Task<T>> operation,
@@ -338,27 +301,25 @@ internal sealed class BingClient : IDisposable
             last);
     }
 
-    private static string GetString(Dictionary<string, object> entry, string name)
-        => entry.TryGetValue(name, out object value) && value is string text ? text : string.Empty;
+    private static string GetString(JsonElement entry, string name)
+        => entry.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
 
-    private static bool GetBool(Dictionary<string, object> entry, string name, bool fallback)
+    private static bool GetBool(JsonElement entry, string name, bool fallback)
     {
-        if (!entry.TryGetValue(name, out object value))
+        if (!entry.TryGetProperty(name, out JsonElement value))
         {
             return fallback;
         }
 
-        if (value is bool flag)
+        return value.ValueKind switch
         {
-            return flag;
-        }
-
-        if (value is int number)
-        {
-            return number != 0;
-        }
-
-        return fallback;
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number => value.TryGetInt32(out int number) && number != 0,
+            _ => fallback,
+        };
     }
 
     private static void DeleteQuietly(string path)

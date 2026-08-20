@@ -4,53 +4,44 @@ using System.Runtime.InteropServices;
 namespace BingWallpaper.Theme;
 
 /// <summary>
-/// Win32 interop for dark mode.
+/// Win32 interop for the parts of the UI that WinUI does not paint.
 ///
-/// The uxtheme entries below are *undocumented ordinal exports*. They are the only
-/// way to make common controls (menus, scroll bars, list views) follow a dark
-/// palette on Windows 10, and they are what every dark-mode Win32 application uses
-/// (see the MIT licensed reference implementation adzm/win32-darkmode).
+/// WinUI 3 themes its own windows through <c>ElementTheme</c>, but two things stay
+/// out of its reach: the title bar Windows draws around a WinUI window, and the
+/// tray menu, which is a real Win32 popup menu. The uxtheme entries below are
+/// *undocumented ordinal exports* - they are the only way to make a Win32 menu
+/// follow a dark palette on Windows 10, and they are what every dark-mode Win32
+/// application uses (see the MIT licensed reference implementation
+/// adzm/win32-darkmode).
 ///
 /// Risk: an ordinal can disappear or change meaning in a future Windows build.
 /// Therefore every call here is wrapped in try/catch; on failure the application
-/// logs and keeps running with the light palette instead of crashing.
-///
-/// Application.SetColorMode is deliberately NOT used: SystemColorMode is only
-/// supported on Windows 11 and silently falls back to the classic light theme on
-/// Windows 10, which is our minimum target (LTSC 2021, build 19044).
+/// logs and keeps running with a light menu instead of crashing.
 /// </summary>
 internal static class DarkModeNative
 {
     /// <summary>DWMWA_USE_IMMERSIVE_DARK_MODE, stable value since build 19041.</summary>
     private const int DwmwaUseImmersiveDarkMode = 20;
 
-    /// <summary>PreferredAppMode.AllowDark</summary>
-    private const int PreferredAppModeAllowDark = 1;
+    /// <summary>PreferredAppMode.Default</summary>
+    private const int PreferredAppModeDefault = 0;
 
     /// <summary>PreferredAppMode.ForceDark</summary>
     private const int PreferredAppModeForceDark = 2;
 
-    /// <summary>PreferredAppMode.Default</summary>
-    private const int PreferredAppModeDefault = 0;
-
     private static bool _appModeFailed;
 
     /// <summary>
-    /// dwmapi!DwmSetWindowAttribute - Windows Vista+, attribute 20 needs build 19041+.
-    /// Our minimum supported build is 19044, so no compatibility branch for the old
-    /// attribute number 19 is required.
+    /// dwmapi!DwmSetWindowAttribute - Windows Vista+, attribute 20 needs build 19041+,
+    /// which is this program's minimum.
     /// </summary>
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int pvAttribute, int cbAttribute);
 
-    /// <summary>uxtheme!SetWindowTheme - Windows XP+.</summary>
-    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
-    private static extern int SetWindowTheme(IntPtr hwnd, string? subAppName, string? subIdList);
-
     /// <summary>
     /// uxtheme.dll ordinal #135, SetPreferredAppMode(int). Undocumented, semantics
-    /// stable since Windows 10 1903. On 1809 the same ordinal was AllowDarkModeForApp(bool);
-    /// we require 19044 so the int signature is correct.
+    /// stable since Windows 10 1903. On 1809 the same ordinal was
+    /// AllowDarkModeForApp(bool); we require 19041 so the int signature is correct.
     /// </summary>
     [DllImport("uxtheme.dll", EntryPoint = "#135", SetLastError = true)]
     private static extern int SetPreferredAppMode(int preferredAppMode);
@@ -65,7 +56,16 @@ internal static class DarkModeNative
     private static extern void RefreshImmersiveColorPolicyState();
 
     /// <summary>
-    /// Sets the process wide preferred app mode. Called once per theme switch.
+    /// uxtheme.dll ordinal #136, FlushMenuThemes(). Undocumented, 1809+. Without it
+    /// a menu keeps the colours it was themed with when the process started, so a
+    /// theme switch would only reach the menu after a restart.
+    /// </summary>
+    [DllImport("uxtheme.dll", EntryPoint = "#136", SetLastError = true)]
+    private static extern void FlushMenuThemes();
+
+    /// <summary>
+    /// Sets the process wide preferred app mode and repaints what is already
+    /// themed. Called once per theme switch.
     /// </summary>
     public static void SetAppMode(bool dark)
     {
@@ -79,13 +79,14 @@ internal static class DarkModeNative
             int mode = dark ? PreferredAppModeForceDark : PreferredAppModeDefault;
             SetPreferredAppMode(mode);
             RefreshImmersiveColorPolicyState();
+            FlushMenuThemes();
             Logger.Debug("SetPreferredAppMode(" + mode + ") applied.");
         }
         catch (Exception ex)
         {
             _appModeFailed = true;
             Logger.Warn(
-                "Undocumented uxtheme dark mode API unavailable, falling back to managed colours only: " +
+                "Undocumented uxtheme dark mode API unavailable, the tray menu stays light: " +
                 ex.GetType().Name + ": " + ex.Message);
         }
     }
@@ -108,7 +109,11 @@ internal static class DarkModeNative
         }
     }
 
-    /// <summary>Paints the title bar dark (or restores the light one).</summary>
+    /// <summary>
+    /// Paints the title bar dark (or restores the light one). WinUI colours the
+    /// client area from the element theme, but the caption is drawn by the desktop
+    /// window manager and only listens to this.
+    /// </summary>
     public static void ApplyTitleBar(IntPtr handle, bool dark)
     {
         if (handle == IntPtr.Zero)
@@ -128,42 +133,6 @@ internal static class DarkModeNative
         catch (Exception ex)
         {
             Logger.Warn("DwmSetWindowAttribute failed: " + ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Applies a themed window class. "DarkMode_Explorer" darkens list views, tree
-    /// views and scroll bars; "DarkMode_CFD" darkens combo box and edit borders.
-    /// Passing null restores the default theme.
-    /// </summary>
-    public static void ApplyWindowTheme(IntPtr handle, string? theme)
-    {
-        if (handle == IntPtr.Zero)
-        {
-            return;
-        }
-
-        try
-        {
-            SetWindowTheme(handle, theme, null);
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug("SetWindowTheme failed: " + ex.Message);
-        }
-    }
-
-    /// <summary>Kept for completeness; AllowDark is the softer variant of ForceDark.</summary>
-    public static void SetAllowDarkAppMode()
-    {
-        try
-        {
-            SetPreferredAppMode(PreferredAppModeAllowDark);
-            RefreshImmersiveColorPolicyState();
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug("SetPreferredAppMode(AllowDark) failed: " + ex.Message);
         }
     }
 }

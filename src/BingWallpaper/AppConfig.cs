@@ -87,11 +87,11 @@ internal sealed class AppConfig
         config.Resolution = ParseResolution(GetString(values, "Resolution", "UHD"));
         config.Fit = ParseEnum(GetString(values, "Fit", "Fill"), WallpaperFit.Fill);
         config.Theme = ParseEnum(GetString(values, "Theme", "System"), ThemeMode.System);
-        config.RefreshIntervalHours = Clamp(
+        config.RefreshIntervalHours = Math.Clamp(
             GetInt(values, "RefreshIntervalHours", 1),
             MinRefreshIntervalHours,
             MaxRefreshIntervalHours);
-        config.KeepDays = Clamp(GetInt(values, "KeepDays", 30), 0, MaxKeepDays);
+        config.KeepDays = Math.Clamp(GetInt(values, "KeepDays", 30), 0, MaxKeepDays);
         config.RunAtStartup = GetBool(values, "RunAtStartup", false);
         config.PinnedWallpaper = SanitizeFileName(GetString(values, "PinnedWallpaper", string.Empty));
         return config;
@@ -120,9 +120,7 @@ internal sealed class AppConfig
     /// <summary>Normalizes a market code to the "xx-YY" shape Bing expects.</summary>
     public static string NormalizeMarket(string? market)
     {
-        // string.IsNullOrWhiteSpace has no [NotNullWhen(false)] annotation in the
-        // .NET Framework reference assemblies, so the null check is written out.
-        if (market is null || market.Trim().Length == 0)
+        if (string.IsNullOrWhiteSpace(market))
         {
             return "zh-CN";
         }
@@ -155,8 +153,9 @@ internal sealed class AppConfig
 
         try
         {
-            // Path.GetFileName throws on invalid path characters here - the .NET
-            // Framework overload validates its argument, unlike the modern one.
+            // Path.GetFileName does not validate its argument on modern .NET, it just
+            // cuts at the last separator - which is exactly the comparison needed here:
+            // a value that survives it unchanged carries no directory at all.
             if (string.Equals(Path.GetFileName(trimmed), trimmed, StringComparison.Ordinal))
             {
                 return trimmed;
@@ -260,7 +259,4 @@ internal sealed class AppConfig
     private static TEnum ParseEnum<TEnum>(string value, TEnum fallback)
         where TEnum : struct, Enum
         => Enum.TryParse(value.Trim(), ignoreCase: true, out TEnum parsed) ? parsed : fallback;
-
-    /// <summary>Math.Clamp does not exist on .NET Framework.</summary>
-    public static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
 }

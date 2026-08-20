@@ -1,0 +1,80 @@
+<Window
+    x:Class="BingWallpaper.UI.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <!--
+        Two columns: the caption of a setting and the setting itself. Every row sizes
+        itself, and the window sizes itself to the whole grid (see the code behind),
+        so nothing is clipped at 125%, 150% or any other scaling factor.
+    -->
+    <Grid x:Name="Root"
+          Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+          Padding="24,20,24,16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="壁纸地区"
+                   VerticalAlignment="Center" Margin="0,6,24,6" />
+        <ComboBox x:Name="MarketBox" Grid.Row="0" Grid.Column="1"
+                  MinWidth="150" HorizontalAlignment="Left" Margin="0,6,0,6" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="分辨率"
+                   VerticalAlignment="Center" Margin="0,6,24,6" />
+        <RadioButtons x:Name="ResolutionButtons" Grid.Row="1" Grid.Column="1"
+                      MaxColumns="2" Margin="0,2,0,2">
+            <x:String>4K</x:String>
+            <x:String>1080p</x:String>
+        </RadioButtons>
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="填充方式"
+                   VerticalAlignment="Center" Margin="0,6,24,6" />
+        <ComboBox x:Name="FitBox" Grid.Row="2" Grid.Column="1"
+                  MinWidth="150" HorizontalAlignment="Left" Margin="0,6,0,6" />
+
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="界面主题"
+                   VerticalAlignment="Center" Margin="0,6,24,6" />
+        <RadioButtons x:Name="ThemeButtons" Grid.Row="3" Grid.Column="1"
+                      MaxColumns="3" Margin="0,2,0,2">
+            <x:String>跟随系统</x:String>
+            <x:String>亮色</x:String>
+            <x:String>暗色</x:String>
+        </RadioButtons>
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="检查间隔"
+                   VerticalAlignment="Center" Margin="0,6,24,6" />
+        <ComboBox x:Name="IntervalBox" Grid.Row="4" Grid.Column="1"
+                  MinWidth="150" HorizontalAlignment="Left" Margin="0,6,0,6" />
+
+        <TextBlock Grid.Row="5" Grid.Column="0" Text="保留天数"
+                   VerticalAlignment="Center" Margin="0,6,24,6" />
+        <ComboBox x:Name="KeepDaysBox" Grid.Row="5" Grid.Column="1"
+                  MinWidth="150" HorizontalAlignment="Left" Margin="0,6,0,6" />
+
+        <TextBlock Grid.Row="6" Grid.Column="0" Text="开机自启"
+                   VerticalAlignment="Center" Margin="0,6,24,6" />
+        <ToggleSwitch x:Name="StartupSwitch" Grid.Row="6" Grid.Column="1"
+                      OnContent="" OffContent="" HorizontalAlignment="Left" Margin="0,4,0,4" />
+
+        <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,14,0,0">
+            <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,0,0,14" />
+            <Button x:Name="CloseButton" Content="关闭" MinWidth="92"
+                    HorizontalAlignment="Right" />
+        </StackPanel>
+    </Grid>
+</Window>
