@@ -17,9 +17,9 @@ namespace BingWallpaper.UI;
 internal sealed class ThumbnailTile : Control
 {
     /// <summary>Logical pixels. The picture is 16:9, the rest holds the two lines.</summary>
-    public const int TileWidth = 240;
+    public const int TileWidth = 200;
 
-    public const int TileHeight = 186;
+    public const int TileHeight = 160;
 
     public const int TileMargin = 8;
 
@@ -121,7 +121,10 @@ internal sealed class ThumbnailTile : Control
             palette.Text,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
 
-        if (Focused)
+        // ShowFocusCues, not Focused alone: Windows hides focus rectangles until the
+        // user actually navigates by keyboard, and the tile that happens to hold the
+        // focus when the window opens should not be ringed.
+        if (Focused && ShowFocusCues)
         {
             using Pen focus = new(palette.Accent) { DashStyle = DashStyle.Dot };
             g.DrawRectangle(focus, 0, 0, Width - 1, Height - 1);

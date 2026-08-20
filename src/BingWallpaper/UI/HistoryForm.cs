@@ -18,8 +18,13 @@ namespace BingWallpaper.UI;
 /// </summary>
 internal sealed class HistoryForm : Form
 {
-    /// <summary>How many tiles the window shows per row when it opens.</summary>
-    private const int Columns = 3;
+    /// <summary>
+    /// The window is sized to exactly this grid. Bing serves at most 8 days, so
+    /// 4x2 shows all of them at once: no scroll bar, and no gap in the last row.
+    /// </summary>
+    private const int Columns = 4;
+
+    private const int Rows = 2;
 
     private readonly TrayContext _context;
     private readonly FlowLayoutPanel _grid = new();
@@ -44,13 +49,10 @@ internal sealed class HistoryForm : Form
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         ShowInTaskbar = true;
-
-        // Logical pixels, scaled by AutoScaleMode.Dpi. Wide enough for whole tiles
-        // plus the scroll bar, so the grid never opens with a clipped column.
-        int tileRow = ThumbnailTile.TileWidth + (ThumbnailTile.TileMargin * 2);
-        int chrome = 20 + 16;
-        ClientSize = new Size((tileRow * Columns) + chrome, 520);
-        MinimumSize = new Size((tileRow * 2) + chrome + 16, 400);
+        // Fixed: the window is exactly one grid wide and tall, so there is nothing
+        // for a resize or a maximise to do except add empty space around the tiles.
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        MaximizeBox = false;
 
         _grid.Dock = DockStyle.Fill;
         _grid.AutoScroll = true;
@@ -79,6 +81,29 @@ internal sealed class HistoryForm : Form
     {
         base.OnHandleCreated(e);
         ThemeManager.ApplyToForm(this);
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        FitToGrid();
+    }
+
+    /// <summary>
+    /// Sizes the window to hold exactly <see cref="Columns"/> x <see cref="Rows"/>
+    /// tiles. The measurements are read back from the controls instead of computed
+    /// from the logical constants, because the tiles scale themselves through
+    /// DpiScale while the panels around them were scaled by AutoScaleMode.Dpi.
+    /// </summary>
+    private void FitToGrid()
+    {
+        int margin = DpiScale.Round(ThumbnailTile.TileMargin) * 2;
+        int cell = DpiScale.Round(ThumbnailTile.TileWidth) + margin;
+        int row = DpiScale.Round(ThumbnailTile.TileHeight) + margin;
+
+        ClientSize = new Size(
+            (cell * Columns) + _grid.Padding.Horizontal,
+            (row * Rows) + _grid.Padding.Vertical + _statusSeparator.Height + _status.Height);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
