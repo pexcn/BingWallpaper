@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,19 +12,25 @@ namespace BingWallpaper.UI;
 /// <summary>
 /// Thumbnail grid of the last 8 days. Clicking an entry applies it immediately;
 /// images that are not cached yet are downloaded on demand.
+///
+/// The grid is a FlowLayoutPanel of owner drawn tiles rather than a ListView: see
+/// <see cref="ThumbnailTile"/> for what the ListView decided on its own.
 /// </summary>
 internal sealed class HistoryForm : Form
 {
-    private static readonly Size ThumbnailSize = new Size(DpiScale.Round(200), DpiScale.Round(120));
+    /// <summary>How many tiles the window shows per row when it opens.</summary>
+    private const int Columns = 3;
 
     private readonly TrayContext _context;
-    private readonly ListView _list = new();
-    private readonly ImageList _thumbnails = new();
+    private readonly FlowLayoutPanel _grid = new();
+    private readonly ThemedSeparator _statusSeparator = new();
     private readonly Label _status = new();
+    private readonly List<ThumbnailTile> _tiles = new();
 
     private List<BingImageInfo> _images = new();
     private CancellationTokenSource? _thumbnailCts;
     private string _loadedSignature = string.Empty;
+    private string _statusText = "正在加载…";
     private bool _busy;
 
     public HistoryForm(TrayContext context)
@@ -38,29 +43,33 @@ internal sealed class HistoryForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(760, 520);
-        MinimumSize = new Size(520, 360);
         ShowInTaskbar = true;
 
-        _thumbnails.ColorDepth = ColorDepth.Depth32Bit;
-        _thumbnails.ImageSize = ThumbnailSize;
+        // Logical pixels, scaled by AutoScaleMode.Dpi. Wide enough for whole tiles
+        // plus the scroll bar, so the grid never opens with a clipped column.
+        int tileRow = ThumbnailTile.TileWidth + (ThumbnailTile.TileMargin * 2);
+        int chrome = 20 + 16;
+        ClientSize = new Size((tileRow * Columns) + chrome, 520);
+        MinimumSize = new Size((tileRow * 2) + chrome + 16, 400);
 
-        _list.Dock = DockStyle.Fill;
-        _list.View = View.LargeIcon;
-        _list.LargeImageList = _thumbnails;
-        _list.MultiSelect = false;
-        _list.HideSelection = false;
-        _list.BorderStyle = BorderStyle.FixedSingle;
-        _list.MouseClick += OnListMouseClick;
-        _list.KeyDown += OnListKeyDown;
+        _grid.Dock = DockStyle.Fill;
+        _grid.AutoScroll = true;
+        _grid.WrapContents = true;
+        _grid.FlowDirection = FlowDirection.LeftToRight;
+        _grid.Padding = new Padding(8);
+
+        _statusSeparator.Dock = DockStyle.Bottom;
 
         _status.Dock = DockStyle.Bottom;
         _status.Height = 28;
         _status.TextAlign = ContentAlignment.MiddleLeft;
         _status.Padding = new Padding(8, 0, 8, 0);
-        _status.Text = "正在加载…";
+        _status.Text = _statusText;
 
-        Controls.Add(_list);
+        // Docking is resolved from the last control backwards, so the status bar
+        // takes the bottom edge, the rule sits above it and the grid fills the rest.
+        Controls.Add(_grid);
+        Controls.Add(_statusSeparator);
         Controls.Add(_status);
 
         ThemeManager.ApplyToForm(this);
@@ -89,7 +98,6 @@ internal sealed class HistoryForm : Form
         {
             _thumbnailCts?.Cancel();
             _thumbnailCts?.Dispose();
-            _thumbnails.Dispose();
         }
 
         base.Dispose(disposing);
@@ -100,7 +108,7 @@ internal sealed class HistoryForm : Form
     {
         if (images.Count == 0)
         {
-            _status.Text = "正在获取最近 8 天的壁纸信息…";
+            SetStatus("正在获取最近 8 天的壁纸信息…");
             _ = FetchAsync();
             return;
         }
@@ -108,6 +116,7 @@ internal sealed class HistoryForm : Form
         // Re-showing the window must not re-download every thumbnail.
         if (BuildSignature(images) == _loadedSignature)
         {
+            UpdateCurrentMarker();
             return;
         }
 
@@ -145,7 +154,7 @@ internal sealed class HistoryForm : Form
         catch (Exception ex)
         {
             Logger.Error("Could not load the wallpaper history.", ex);
-            _status.Text = "获取壁纸列表失败，详见日志文件。";
+            SetStatus("获取壁纸列表失败，详见日志文件。");
         }
     }
 
@@ -163,30 +172,77 @@ internal sealed class HistoryForm : Form
         _thumbnailCts?.Dispose();
         _thumbnailCts = CancellationTokenSource.CreateLinkedTokenSource(_context.ShutdownToken);
 
-        _list.BeginUpdate();
+        _grid.SuspendLayout();
         try
         {
-            _list.Items.Clear();
-            _thumbnails.Images.Clear();
-            foreach (BingImageInfo image in _images)
+            foreach (ThumbnailTile tile in _tiles)
             {
-                ListViewItem item = new(image.DisplayDate + Environment.NewLine + Shorten(image.DisplayTitle))
-                {
-                    ToolTipText = image.DisplayTitle + Environment.NewLine + image.Copyright,
-                    ImageIndex = -1,
-                };
-                _list.Items.Add(item);
+                _grid.Controls.Remove(tile);
+                tile.Dispose();
+            }
+
+            _tiles.Clear();
+
+            for (int i = 0; i < _images.Count; i++)
+            {
+                ThumbnailTile tile = new ThumbnailTile(i, _images[i]);
+                tile.Click += OnTileClick;
+                tile.MouseEnter += OnTileMouseEnter;
+                tile.MouseLeave += OnTileMouseLeave;
+                _tiles.Add(tile);
+                _grid.Controls.Add(tile);
             }
         }
         finally
         {
-            _list.EndUpdate();
+            _grid.ResumeLayout(performLayout: true);
         }
 
-        _list.ShowItemToolTips = true;
-        _status.Text = "共 " + _images.Count + " 天，点击任意一张即可设为壁纸。";
+        // The tiles were created after the window was themed, so colour them now.
+        ThemeManager.ApplyToControl(_grid);
+        UpdateCurrentMarker();
+
+        SetStatus("共 " + _images.Count + " 天，点击任意一张即可设为壁纸。");
         _ = LoadThumbnailsAsync(_thumbnailCts.Token);
     }
+
+    /// <summary>Remembers the text so hovering a tile can restore it afterwards.</summary>
+    private void SetStatus(string text)
+    {
+        _statusText = text;
+        _status.Text = text;
+    }
+
+    private void UpdateCurrentMarker()
+    {
+        int current = _context.CurrentIndex;
+        foreach (ThumbnailTile tile in _tiles)
+        {
+            tile.IsCurrent = tile.Index == current;
+        }
+    }
+
+    private void OnTileClick(object? sender, EventArgs e)
+    {
+        if (sender is ThumbnailTile tile)
+        {
+            _ = ApplyAsync(tile.Index);
+        }
+    }
+
+    /// <summary>
+    /// The status bar doubles as the place where a title is shown in full - the tile
+    /// itself has to cut long ones off at its own width.
+    /// </summary>
+    private void OnTileMouseEnter(object? sender, EventArgs e)
+    {
+        if (sender is ThumbnailTile tile)
+        {
+            _status.Text = tile.Info.DisplayDate + "  " + tile.Info.DisplayTitle;
+        }
+    }
+
+    private void OnTileMouseLeave(object? sender, EventArgs e) => _status.Text = _statusText;
 
     private async Task LoadThumbnailsAsync(CancellationToken cancellationToken)
     {
@@ -204,16 +260,12 @@ internal sealed class HistoryForm : Form
                     .DownloadBytesAsync(image.GetThumbnailUrl(), cancellationToken)
                     .ConfigureAwait(true);
 
-                if (cancellationToken.IsCancellationRequested || IsDisposed || i >= _list.Items.Count)
+                if (cancellationToken.IsCancellationRequested || IsDisposed || i >= _tiles.Count)
                 {
                     return;
                 }
 
-                using (Bitmap thumbnail = CreateThumbnail(bytes))
-                {
-                    _thumbnails.Images.Add(thumbnail);
-                    _list.Items[i].ImageIndex = _thumbnails.Images.Count - 1;
-                }
+                _tiles[i].Thumbnail = Decode(bytes);
             }
             catch (OperationCanceledException)
             {
@@ -226,41 +278,17 @@ internal sealed class HistoryForm : Form
         }
     }
 
-    private static Bitmap CreateThumbnail(byte[] bytes)
+    /// <summary>
+    /// Copies the bytes into a standalone bitmap. Image.FromStream keeps using the
+    /// stream it was given, which is closed as soon as this method returns, and the
+    /// tile scales the picture to its own box while painting.
+    /// </summary>
+    private static Bitmap Decode(byte[] bytes)
     {
         using (MemoryStream stream = new MemoryStream(bytes))
         using (Image source = Image.FromStream(stream))
         {
-            Bitmap target = new Bitmap(ThumbnailSize.Width, ThumbnailSize.Height);
-            using (Graphics graphics = Graphics.FromImage(target))
-            {
-                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                graphics.DrawImage(source, 0, 0, ThumbnailSize.Width, ThumbnailSize.Height);
-            }
-
-            return target;
-        }
-    }
-
-    private void OnListMouseClick(object? sender, MouseEventArgs e)
-    {
-        if (e.Button != MouseButtons.Left)
-        {
-            return;
-        }
-
-        ListViewHitTestInfo hit = _list.HitTest(e.Location);
-        if (hit.Item is not null)
-        {
-            _ = ApplyAsync(hit.Item.Index);
-        }
-    }
-
-    private void OnListKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.KeyCode == Keys.Enter && _list.SelectedIndices.Count > 0)
-        {
-            _ = ApplyAsync(_list.SelectedIndices[0]);
+            return new Bitmap(source);
         }
     }
 
@@ -273,23 +301,21 @@ internal sealed class HistoryForm : Form
 
         _busy = true;
         BingImageInfo image = _images[index];
-        _status.Text = "正在应用 " + image.DisplayDate + " 的壁纸…";
+        SetStatus("正在应用 " + image.DisplayDate + " 的壁纸…");
         try
         {
             await _context.ApplyFromHistoryAsync(index).ConfigureAwait(true);
-            _status.Text = "已应用：" + image.DisplayDate + "  " + image.DisplayTitle;
+            SetStatus("已应用：" + image.DisplayDate + "  " + image.DisplayTitle);
         }
         catch (Exception ex)
         {
             Logger.Error("Could not apply the selected wallpaper.", ex);
-            _status.Text = "应用失败，详见日志文件。";
+            SetStatus("应用失败，详见日志文件。");
         }
         finally
         {
             _busy = false;
+            UpdateCurrentMarker();
         }
     }
-
-    private static string Shorten(string value)
-        => value.Length <= 18 ? value : value.Substring(0, 17) + "…";
 }
