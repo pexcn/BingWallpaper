@@ -84,9 +84,10 @@
 - **主键是 `file`**（Windows 下大小写不敏感比较）。用户自带的图没有 `imageId` / `startdate`，
   而文件名是目录里唯一必然存在的东西。
 - `market` / `title` / `copyright` 取**首次获取时那个市场**的值（同一张图在 de-DE 下标题是德文）。
-- **读**用现成的 `JavaScriptSerializer`；**写**要自己来——它只输出压缩成一行的 JSON，跟
-  「纯文本可手改」的调性冲突，也不利于看 diff。手写一个带缩进的输出器很小（转义只有
-  `"`、`\`、控制字符三类），UTF-8 无 BOM，`.tmp` + 原子改名。
+- 读写都用 `System.Text.Json` 的低层 API：读用 `JsonDocument`，写用
+  `Utf8JsonWriter` 并打开 `Indented`——「纯文本可手改」要求带缩进的输出，压成一行既不好手改
+  也不好看 diff。**不要用 `JsonSerializer` 的反射重载**，Native AOT 下它要么被裁掉要么要源生成器；
+  这里字段就那么几个，手写读写反而更短。UTF-8 无 BOM，`.tmp` + 原子改名。
 - **解析失败不许静默重建**：坏文件改名成 `favorites.json.bad`，从目录扫描重建，记日志。
 - 只在真有变化时才落盘（脏标记）；对账扫描本身不产生写入。
 
@@ -140,8 +141,9 @@
 - **失效**：缩略图 LastWriteTime 早于源文件就重生成（同名覆盖时能正确更新）。
 - **生成时机**：**不在启动时做**。启动只做那趟不解码的对账；缩略图在收藏 tab 首次显示时按需
   生成，后台单线程队列，UI 先占位后替换。500 张图第一次打开会慢一会儿，之后全部命中。
-- **尺寸**：长边 320 逻辑像素 × DPI 缩放，**高质量 bicubic 一步到位**（同图标 16/20/24 帧的
-  判断：逐级缩小出来的东西发虚），JPEG 质量 85。
+- **尺寸**：长边 320 逻辑像素（Avalonia 按窗口所在屏的缩放自己放大，代码里不做 DPI 换算），
+  **高质量重采样一步到位**（同图标 16/20/24 帧的判断：逐级缩小出来的东西发虚），JPEG 质量 85。
+  解码与缩放都走 Skia，跟下载校验用的是同一个解码器。
 - **`.thumbs\` 是程序唯一可以删东西的地方**：源文件没了的孤儿缩略图在对账时清掉。因此 README
   里那句「永不删除」要写成**覆盖图片文件、不覆盖 `.thumbs\`**，否则话说满了。
 - `daily\` 视图固定 8 张，维持现状不接缓存，避免「缓存目录跟着清理策略走」的耦合；两边共用
@@ -155,17 +157,15 @@
 - 当前壁纸项下面加一条「★ 收藏当前壁纸 / 取消收藏」切换项。菜单里已经有一个「固定当前壁纸」
   勾选项，两者含义不同（一个管显示什么，一个管保留什么），措辞和位置都要让人一眼分得开。
 
-### 壁纸选择窗口（原 HistoryForm）
+### 壁纸选择窗口（原 HistoryWindow）
 
 顶部两个 tab：「**最近**」「**收藏**」。
 
-**不要用 WinForms 的 `TabControl`。** 它是深色模式的老大难：即使 `DrawMode = OwnerDrawFixed`
-能自绘标签项，标签条背景和页面边框仍由 comctl32 按系统主题绘制，深色下会露出浅色条；
-`SetWindowTheme("", "")` 关掉主题又退回 Win95 外观。
+这一段原本写着长长的警告：不要用 WinForms 的 `TabControl`，因为标签条背景和页面边框由 comctl32
+按系统主题绘制，深色下会露出浅色条。**换到 Avalonia 之后这个问题不存在了**——每个像素都是
+Avalonia 自己画的，`TabControl` 跟着 `ThemeVariant` 走，直接用即可。
 
-**推荐做法**：顶部一个**自绘分段控件**（两个互斥 toggle 按钮，选中态用强调色蓝，与项目已有
-的自绘单选 / 复选框同一套画法），下方一个 `Panel` 切换内容。可控、零主题坑、风格统一。
-别忘了键盘可达性：Left/Right 切换 + 焦点框。
+需要注意的只剩键盘可达性（Left/Right 切换 + 焦点框），Avalonia 的 `TabControl` 默认已经给了。
 
 **内容区**：
 
@@ -228,9 +228,10 @@
 - **新增** `UI/ThumbnailCache.cs`——缩略图生成与缓存。
 - `Paths.cs`——`daily\` / `favorites\` / `.thumbs\` 常量。
 - `WallpaperService.cs`——路径解析顺序、清理器只扫 `daily\`（保护参数已经是集合，不必再动签名）。
-- `UI/HistoryForm.cs`——分段控件 + 双视图（可考虑连类名一起改成 `PickerForm`）。
-- `UI/ThumbnailTile.cs`——星标叠加、右键菜单、占位态。
-- `UI/TrayContext.cs`——菜单项改名、收藏切换项。
+- `UI/HistoryWindow.cs`——`TabControl` + 双视图（可考虑连类名一起改成 `PickerWindow`）。
+- `UI/ThumbnailTile.cs`——星标叠加、右键菜单（Avalonia 的 `ContextMenu`）、占位态。
+- `UI/TrayMenuWindow.cs` / `UI/TrayController.cs`——菜单多一行（记得同步 `MenuRow` 的高度合计，
+  菜单窗口的高度是算出来的）、收藏切换项。
 - `README.md`——「目录布局」改成新结构；「本程序改动了什么」表里加 `wallpapers\daily\`、
   `wallpapers\favorites\`、`favorites.json`，写明**程序永不删除 favorites 下的图片文件
   （`.thumbs\` 缓存除外）**；特性列表加一条收藏夹。
