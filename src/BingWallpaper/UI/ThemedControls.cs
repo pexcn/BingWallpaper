@@ -176,7 +176,10 @@ internal sealed class ThemedComboBox : ComboBox
                 Rectangle text = new(1, 1, button.Left - 1, Height - 2);
                 g.FillRectangle(background, text);
 
-                // The inset the native control leaves in front of its text.
+                // The inset the native control leaves in front of its text. NoPadding
+                // is what makes it the whole inset: TextRenderer adds a glyph overhang
+                // of its own otherwise, and the value would shift to the right by a
+                // few pixels every time the control took the focus.
                 text.Inflate(-DpiScale.Round(2), 0);
                 TextRenderer.DrawText(
                     g,
@@ -185,7 +188,8 @@ internal sealed class ThemedComboBox : ComboBox
                     text,
                     Enabled ? palette.Text : palette.SecondaryText,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                    TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+                    TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+                    TextFormatFlags.EndEllipsis);
             }
         }
 
