@@ -57,7 +57,7 @@ internal sealed class SettingsForm : Form
     private readonly ThemedComboBox _keepDaysBox = new();
     // No caption: the row label carries it, like every other setting.
     private readonly ThemedCheckBox _startupBox = new(string.Empty);
-    private readonly Button _closeButton = new();
+    private readonly ThemedButton _closeButton = new();
 
     private TableLayoutPanel _root = null!;
     private bool _loading;

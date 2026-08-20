@@ -359,3 +359,150 @@ internal sealed class ThemedCheckBox : CheckBox
         base.OnEnabledChanged(e);
     }
 }
+
+/// <summary>
+/// Owner drawn push button.
+/// <para>
+/// A plain Button does not centre its caption in itself: the WinForms button
+/// adapter derives a text rectangle from the border width, the focus rectangle and
+/// the padding, and centres the caption in <em>that</em>. With the Chinese UI font
+/// the result visibly sits low in the button, and it cannot be corrected from the
+/// outside - button height and padding both change the box the text is centred in,
+/// so they move the button without moving the text inside it.
+/// </para>
+/// <para>
+/// Drawing the caption straight into the client rectangle - exactly what
+/// <see cref="ThemedComboBox"/> does, where the same font looks right - is the fix.
+/// It also brings the last system drawn control in this UI under the palette.
+/// </para>
+/// </summary>
+internal sealed class ThemedButton : Button
+{
+    private bool _hovered;
+    private bool _pressed;
+
+    public ThemedButton()
+    {
+        // Flat with no border of its own: everything below is painted by hand, and
+        // this keeps the base class from reserving room for a frame it will not draw.
+        FlatStyle = FlatStyle.Flat;
+        FlatAppearance.BorderSize = 0;
+        SetStyle(
+            ControlStyles.UserPaint
+            | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw,
+            true);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        ThemePalette palette = ThemeManager.Palette;
+        Graphics g = e.Graphics;
+
+        Color face = palette.IsDark ? palette.ControlBackground : SystemColors.Control;
+        Color caption = Enabled ? palette.Text : palette.SecondaryText;
+
+        if (Enabled && _pressed)
+        {
+            face = palette.Selection;
+            caption = palette.SelectionText;
+        }
+        else if (Enabled && _hovered)
+        {
+            face = palette.Hover;
+        }
+
+        using (SolidBrush brush = new(face))
+        {
+            g.FillRectangle(brush, ClientRectangle);
+        }
+
+        // IsDefault carries the accent the way Windows rings the default button of a
+        // dialog - the base class would have drawn that frame itself, and no longer does.
+        Color border = !Enabled ? palette.Border
+            : _hovered || _pressed || IsDefault ? palette.Accent
+            : palette.GlyphBorder;
+
+        // No anti aliasing - see ThemedComboBox for what it does to a one pixel frame.
+        using (Pen pen = new(border, Math.Max(1, DpiScale.Round(1))))
+        {
+            g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        }
+
+        TextRenderer.DrawText(
+            g,
+            Text,
+            Font,
+            ClientRectangle,
+            caption,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
+            | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+
+        // ShowFocusCues, not Focused alone: this button is given the focus as soon as
+        // the settings window appears, and a ring around it before the user has
+        // touched the keyboard would just look like an error.
+        if (Focused && ShowFocusCues)
+        {
+            int inset = DpiScale.Round(3);
+            Rectangle focus = Rectangle.Inflate(ClientRectangle, -inset, -inset);
+            using Pen pen = new(caption) { DashStyle = DashStyle.Dot };
+            g.DrawRectangle(pen, focus.X, focus.Y, focus.Width - 1, focus.Height - 1);
+        }
+    }
+
+    protected override void OnMouseEnter(EventArgs e)
+    {
+        _hovered = true;
+        Invalidate();
+        base.OnMouseEnter(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        _hovered = false;
+        _pressed = false;
+        Invalidate();
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            _pressed = true;
+            Invalidate();
+        }
+
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (_pressed)
+        {
+            _pressed = false;
+            Invalidate();
+        }
+
+        base.OnMouseUp(e);
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        Invalidate();
+        base.OnEnabledChanged(e);
+    }
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnGotFocus(e);
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnLostFocus(e);
+    }
+}

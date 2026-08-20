@@ -51,14 +51,14 @@ internal static class ErrorDialog
                 Padding = new Padding(8),
             };
 
-            Button copy = new Button()
+            ThemedButton copy = new ThemedButton()
             {
                 Text = "复制到剪贴板",
                 Width = 140,
                 Height = 30,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
             };
-            Button close = new Button()
+            ThemedButton close = new ThemedButton()
             {
                 Text = "关闭",
                 Width = 100,
