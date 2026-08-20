@@ -44,9 +44,10 @@ jobs:
       - name: Build
         run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -warnaserror -p:Version=${{ steps.version.outputs.value }}
 
-      # Self contained twice over: the .NET runtime and the Windows App SDK runtime
-      # both end up in the publish folder, so the target machine needs no installer.
-      # The whole folder is the application - see the README.
+      # Native AOT: this step invokes the MSVC linker (part of the C++ workload that
+      # windows-latest ships with) and takes a few minutes. The .NET runtime ends up
+      # inside BingWallpaper.exe, the Windows App SDK runtime next to it, so the
+      # target machine needs no installer. The whole folder is the application.
       - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
@@ -55,6 +56,8 @@ jobs:
         run: |
           $files = Get-ChildItem publish -Recurse -File
           $total = ($files | Measure-Object Length -Sum).Sum
+          $exe = Get-Item publish/BingWallpaper.exe
+          "BingWallpaper.exe (native): {0:N1} MB" -f ($exe.Length / 1MB)
           "{0} files, {1:N1} MB total" -f $files.Count, ($total / 1MB)
           $files | Sort-Object Length -Descending | Select-Object -First 15 |
             ForEach-Object { "{0,-52} {1,10:N0} bytes" -f $_.Name, $_.Length }

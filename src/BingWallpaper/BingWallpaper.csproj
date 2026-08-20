@@ -7,10 +7,11 @@
       10.0.19041.0 is both the API surface WinUI itself is built against and this
       project's minimum Windows version (Windows 10 21H2 / LTSC 2021, build 19044,
       is comfortably above it).
-      The two SelfContained switches are what makes the program portable again:
-      the .NET runtime *and* the Windows App SDK runtime are copied next to the
-      executable, so the target machine needs neither installed. See the README
-      for what that costs in size - this is no longer a 200 KB single file.
+      The two SelfContained switches are what makes the program portable again: the
+      .NET runtime is compiled into the executable (see PublishAot below) and the
+      Windows App SDK runtime is copied next to it, so the target machine needs
+      neither installed. See the README for what that costs in size - this is no
+      longer a 200 KB single file.
     -->
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
@@ -22,12 +23,24 @@
     <WindowsPackageType>None</WindowsPackageType>
     <UseWinUI>true</UseWinUI>
     <!--
-      Trimming and Native AOT are deliberately off: the XAML runtime resolves types
-      by name, so a trimmed build fails at run time in ways no compile time check
-      catches. Size is already dominated by the two runtimes anyway.
+      Native AOT: the program is compiled to machine code, so there is no CoreCLR,
+      no JIT and no managed assemblies to load next to the executable. That removes
+      the runtime files that made up the bulk of the publish output and takes the
+      start-up cost of jitting the XAML stack with it.
+      It also means the usual AOT rules apply to the whole code base: nothing may
+      depend on code generated at run time. The XAML that matters here is compiled
+      (x:Bind), the JSON is read element by element instead of deserialized, and the
+      Win32 interop is blittable with an [UnmanagedCallersOnly] window procedure -
+      see UI/TrayIcon.cs.
+      Trimming comes with AOT and cannot be turned off; CsWinRTAotOptimizerEnabled
+      is what makes the WinRT projections survive it.
     -->
-    <PublishTrimmed>false</PublishTrimmed>
-    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishAot>true</PublishAot>
+    <CsWinRTAotOptimizerEnabled>true</CsWinRTAotOptimizerEnabled>
+    <!-- Size over speed: this program spends its time waiting for a timer. -->
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <!-- The tray interop needs pointers; see the note in UI/TrayIcon.cs. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>

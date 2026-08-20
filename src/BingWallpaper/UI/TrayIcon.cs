@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using BingWallpaper.Theme;
 using Microsoft.UI.Dispatching;
@@ -59,8 +60,15 @@ internal sealed class TrayMenuState
 /// rather than a message-only one: message-only windows are excluded from
 /// broadcasts, and WM_SETTINGCHANGE - which is how a theme switch is noticed - is
 /// a broadcast.
+///
+/// Everything below is written for Native AOT, which is why it is unsafe: the
+/// structures are blittable (no MarshalAs, no runtime marshalling stubs), their
+/// sizes come from sizeof rather than Marshal.SizeOf, and the window procedure is
+/// an [UnmanagedCallersOnly] function pointer instead of a delegate. Marshal.SizeOf
+/// and Marshal.GetFunctionPointerForDelegate both need code generated at run time,
+/// which is exactly what an AOT compiled program does not have.
 /// </summary>
-internal sealed class TrayIcon : IDisposable
+internal sealed unsafe class TrayIcon : IDisposable
 {
     private const string WindowClassName = "BingWallpaper.TrayWindow";
 
@@ -106,12 +114,8 @@ internal sealed class TrayIcon : IDisposable
     /// <summary>The one and only tray entry of this process.</summary>
     private const uint IconId = 1;
 
-    /// <summary>
-    /// Kept alive for the lifetime of the process: Windows holds a raw function
-    /// pointer to it, and a collected delegate is a crash the moment a message
-    /// arrives.
-    /// </summary>
-    private static readonly WndProcDelegate Procedure = WindowProc;
+    /// <summary>Size of the szTip buffer; 127 characters plus the terminator.</summary>
+    private const int TooltipCapacity = 128;
 
     private static readonly Dictionary<IntPtr, TrayIcon> Instances = new Dictionary<IntPtr, TrayIcon>();
 
@@ -189,15 +193,19 @@ internal sealed class TrayIcon : IDisposable
         IntPtr instance = GetModuleHandleW(null);
         if (_windowClass == 0)
         {
-            WNDCLASSEXW windowClass = new WNDCLASSEXW
+            // RegisterClassEx copies the name into the atom table, so pinning it for
+            // the length of the call is enough.
+            fixed (char* className = WindowClassName)
             {
-                cbSize = (uint)Marshal.SizeOf<WNDCLASSEXW>(),
-                lpfnWndProc = Marshal.GetFunctionPointerForDelegate(Procedure),
-                hInstance = instance,
-                lpszClassName = WindowClassName,
-            };
+                WNDCLASSEXW windowClass = default;
+                windowClass.cbSize = (uint)sizeof(WNDCLASSEXW);
+                windowClass.lpfnWndProc = (IntPtr)(delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr, IntPtr, IntPtr>)&WindowProc;
+                windowClass.hInstance = instance;
+                windowClass.lpszClassName = (IntPtr)className;
 
-            _windowClass = RegisterClassExW(ref windowClass);
+                _windowClass = RegisterClassExW(&windowClass);
+            }
+
             if (_windowClass == 0)
             {
                 throw new InvalidOperationException(
@@ -234,6 +242,11 @@ internal sealed class TrayIcon : IDisposable
         return window;
     }
 
+    /// <summary>
+    /// The window procedure Windows itself calls. No exception may leave it - one
+    /// that does tears the process down without so much as a log line.
+    /// </summary>
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvStdcall) })]
     private static IntPtr WindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
         if (!Instances.TryGetValue(hwnd, out TrayIcon? instance))
@@ -247,8 +260,6 @@ internal sealed class TrayIcon : IDisposable
         }
         catch (Exception ex)
         {
-            // A managed exception must never travel through the Win32 message
-            // dispatcher; it would tear the process down without a log entry.
             Logger.Error("Tray window procedure failed for message 0x" + message.ToString("X4") + ".", ex);
             return DefWindowProcW(hwnd, message, wParam, lParam);
         }
@@ -371,18 +382,32 @@ internal sealed class TrayIcon : IDisposable
         return Shell_NotifyIconW(action, ref data);
     }
 
-    private NOTIFYICONDATAW CreateData(uint flags, string tooltip) => new NOTIFYICONDATAW
+    private NOTIFYICONDATAW CreateData(uint flags, string tooltip)
     {
-        cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(),
-        hWnd = _window,
-        uID = IconId,
-        uFlags = flags,
-        uCallbackMessage = WM_TRAYCALLBACK,
-        hIcon = _icon,
-        szTip = Truncate(tooltip, 127),
-        szInfo = string.Empty,
-        szInfoTitle = string.Empty,
-    };
+        // default zeroes the whole structure, which is what the balloon fields that
+        // this program never uses have to be.
+        NOTIFYICONDATAW data = default;
+        data.cbSize = (uint)sizeof(NOTIFYICONDATAW);
+        data.hWnd = _window;
+        data.uID = IconId;
+        data.uFlags = flags;
+        data.uCallbackMessage = WM_TRAYCALLBACK;
+        data.hIcon = _icon;
+        WriteFixed(data.szTip, TooltipCapacity, Truncate(tooltip, TooltipCapacity - 1));
+        return data;
+    }
+
+    /// <summary>Copies a string into a fixed buffer, truncated and null terminated.</summary>
+    private static void WriteFixed(char* destination, int capacity, string value)
+    {
+        int length = Math.Min(value.Length, capacity - 1);
+        for (int i = 0; i < length; i++)
+        {
+            destination[i] = value[i];
+        }
+
+        destination[length] = '\0';
+    }
 
     private void ShowMenu()
     {
@@ -460,7 +485,9 @@ internal sealed class TrayIcon : IDisposable
     /// </summary>
     private void Dispatch(TrayCommand command)
     {
-        if (!Enum.IsDefined(typeof(TrayCommand), command))
+        // The menu is built here, so an id from outside this range is either a stray
+        // WM_COMMAND or the "nothing was picked" answer of TrackPopupMenuEx.
+        if (command < TrayCommand.OpenSource || command > TrayCommand.Exit)
         {
             return;
         }
@@ -484,10 +511,7 @@ internal sealed class TrayIcon : IDisposable
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value.Substring(0, maxLength - 1) + "…";
 
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate IntPtr WndProcDelegate(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Sequential)]
     private struct WNDCLASSEXW
     {
         public uint cbSize;
@@ -499,12 +523,17 @@ internal sealed class TrayIcon : IDisposable
         public IntPtr hIcon;
         public IntPtr hCursor;
         public IntPtr hbrBackground;
-        [MarshalAs(UnmanagedType.LPWStr)] public string? lpszMenuName;
-        [MarshalAs(UnmanagedType.LPWStr)] public string? lpszClassName;
+        public IntPtr lpszMenuName;
+        public IntPtr lpszClassName;
         public IntPtr hIconSm;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    /// <summary>
+    /// The character arrays are fixed buffers rather than strings with a ByValTStr
+    /// attribute: that keeps the structure blittable, so it is handed to the shell
+    /// as it is instead of through a marshalling stub.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
     private struct NOTIFYICONDATAW
     {
         public uint cbSize;
@@ -513,12 +542,12 @@ internal sealed class TrayIcon : IDisposable
         public uint uFlags;
         public uint uCallbackMessage;
         public IntPtr hIcon;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+        public fixed char szTip[TooltipCapacity];
         public uint dwState;
         public uint dwStateMask;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo;
+        public fixed char szInfo[256];
         public uint uTimeoutOrVersion;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
+        public fixed char szInfoTitle[64];
         public uint dwInfoFlags;
         public Guid guidItem;
         public IntPtr hBalloonIcon;
@@ -532,7 +561,7 @@ internal sealed class TrayIcon : IDisposable
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern ushort RegisterClassExW(ref WNDCLASSEXW windowClass);
+    private static extern ushort RegisterClassExW(WNDCLASSEXW* windowClass);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateWindowExW(
