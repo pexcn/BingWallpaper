@@ -51,7 +51,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <!--
+      The WinUI component package rather than the Microsoft.WindowsAppSDK
+      meta package. The Windows App SDK is modular since 2.0, and the meta package
+      means "all of it": referencing it drags the AI, ML, Search and Widgets
+      components into the publish folder - onnxruntime.dll and DirectML.dll alone
+      are 40 MB of a program that shows pictures. This pulls WinUI plus what WinUI
+      itself needs (Base, Foundation, InteractiveExperiences) and nothing else.
+      DWriteCore is not among them on purpose: WinUI imports DWrite.dll, the one
+      that is part of Windows.
+      To move to a newer Windows App SDK, bump this one version.
+    -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
   </ItemGroup>
 
   <ItemGroup>

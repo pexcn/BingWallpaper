@@ -34,18 +34,29 @@ public sealed partial class ErrorWindow : Window
     /// Shows a failure. Never throws: this is the last stop of the error path, and a
     /// second failure here would leave the user with nothing at all - so it falls
     /// back to a plain message box and, failing that, to the log alone.
+    /// <para>
+    /// <paramref name="closed"/> runs once the window is gone. The startup path uses
+    /// it to end the process: a failure there leaves no tray icon behind, and the
+    /// user has to be able to read the message before the program disappears.
+    /// </para>
     /// </summary>
-    internal static void Show(string title, string details)
+    internal static void Show(string title, string details, Action? closed = null)
     {
         try
         {
             ErrorWindow window = new ErrorWindow(title, details);
+            if (closed is not null)
+            {
+                window.Closed += (_, _) => closed();
+            }
+
             WindowSupport.ShowAndActivate(window);
         }
         catch (Exception ex)
         {
             Logger.Error("Could not show the error window.", ex);
             NativeMethods.ShowError(title, details);
+            closed?.Invoke();
         }
     }
 

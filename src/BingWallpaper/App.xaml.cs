@@ -105,8 +105,10 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            // Nothing came up: no tray icon, no timer. The window is all there is,
+            // so the process ends with it rather than lingering invisibly.
             Logger.Error("Fatal error during startup.", ex);
-            ErrorWindow.Show("启动失败", Logger.Describe(ex));
+            ErrorWindow.Show("启动失败", Logger.Describe(ex), Shutdown);
         }
     }
 
