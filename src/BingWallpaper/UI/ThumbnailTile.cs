@@ -26,6 +26,7 @@ internal sealed class ThumbnailTile : Control
     private Image? _thumbnail;
     private bool _hovered;
     private bool _isCurrent;
+    private bool _isPinned;
 
     public ThumbnailTile(int index, BingImageInfo info)
     {
@@ -81,6 +82,26 @@ internal sealed class ThumbnailTile : Control
             }
 
             _isCurrent = value;
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Whether this entry is the pinned wallpaper. Only ever set on the tile that is
+    /// current as well - the pin always follows the wallpaper on the desktop - so it
+    /// relabels the badge that is already there instead of adding a second one.
+    /// </summary>
+    public bool IsPinned
+    {
+        get => _isPinned;
+        set
+        {
+            if (_isPinned == value)
+            {
+                return;
+            }
+
+            _isPinned = value;
             Invalidate();
         }
     }
@@ -174,8 +195,8 @@ internal sealed class ThumbnailTile : Control
 
     private void PaintBadge(Graphics g, ThemePalette palette, Rectangle picture)
     {
-        const string Text = "当前";
-        Size text = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+        string caption = _isPinned ? "已固定" : "当前";
+        Size text = TextRenderer.MeasureText(caption, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
         int padX = DpiScale.Round(6);
         int padY = DpiScale.Round(3);
         Rectangle badge = new(
@@ -191,7 +212,7 @@ internal sealed class ThumbnailTile : Control
 
         TextRenderer.DrawText(
             g,
-            Text,
+            caption,
             Font,
             badge,
             palette.GlyphMark,

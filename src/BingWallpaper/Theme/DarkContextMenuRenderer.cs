@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace BingWallpaper.Theme;
@@ -92,6 +93,44 @@ internal sealed class DarkContextMenuRenderer : ToolStripProfessionalRenderer
     {
         e.ArrowColor = _palette.Text;
         base.OnRenderArrow(e);
+    }
+
+    /// <summary>
+    /// Draws the check mark of a checked menu item. The base renderer blits a bitmap
+    /// from the framework resources, which is a dark glyph meant for a light menu and
+    /// all but invisible here; this is the same tick
+    /// <see cref="BingWallpaper.UI.ThemedCheckBox"/> paints, so the two agree.
+    /// </summary>
+    protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+    {
+        Rectangle bounds = e.ImageRectangle;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return;
+        }
+
+        Graphics g = e.Graphics;
+        SmoothingMode previous = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        using (SolidBrush fill = new SolidBrush(_palette.Accent))
+        {
+            g.FillRectangle(fill, bounds);
+        }
+
+        using (Pen tick = new Pen(_palette.GlyphMark, Math.Max(1, DpiScale.Round(2))))
+        {
+            tick.StartCap = LineCap.Round;
+            tick.EndCap = LineCap.Round;
+            g.DrawLines(tick, new[]
+            {
+                new PointF(bounds.Left + (bounds.Width * 0.22f), bounds.Top + (bounds.Height * 0.52f)),
+                new PointF(bounds.Left + (bounds.Width * 0.44f), bounds.Top + (bounds.Height * 0.68f)),
+                new PointF(bounds.Left + (bounds.Width * 0.78f), bounds.Top + (bounds.Height * 0.30f)),
+            });
+        }
+
+        g.SmoothingMode = previous;
     }
 
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)

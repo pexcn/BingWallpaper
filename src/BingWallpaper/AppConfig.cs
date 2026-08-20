@@ -60,6 +60,17 @@ internal sealed class AppConfig
     public bool RunAtStartup { get; set; }
 
     /// <summary>
+    /// File name of the wallpaper the user pinned, or an empty string when the
+    /// wallpaper follows the refresh timer. Deliberately a bare file name and not a
+    /// path: the picture keeps its identity wherever the wallpaper folder ends up
+    /// being organised, and a hand edited path could point anywhere.
+    /// </summary>
+    public string PinnedWallpaper { get; set; } = string.Empty;
+
+    /// <summary>Whether the wallpaper is currently held against the refresh timer.</summary>
+    public bool IsPinned => PinnedWallpaper.Length > 0;
+
+    /// <summary>
     /// Reads the configuration file. A missing or damaged file yields defaults and
     /// is never rewritten implicitly - only explicit Save() touches the disk.
     /// </summary>
@@ -82,6 +93,7 @@ internal sealed class AppConfig
             MaxRefreshIntervalHours);
         config.KeepDays = Clamp(GetInt(values, "KeepDays", 30), 0, MaxKeepDays);
         config.RunAtStartup = GetBool(values, "RunAtStartup", false);
+        config.PinnedWallpaper = SanitizeFileName(GetString(values, "PinnedWallpaper", string.Empty));
         return config;
     }
 
@@ -96,6 +108,7 @@ internal sealed class AppConfig
         sb.AppendLine("RefreshIntervalHours=" + RefreshIntervalHours.ToString(CultureInfo.InvariantCulture));
         sb.AppendLine("KeepDays=" + KeepDays.ToString(CultureInfo.InvariantCulture));
         sb.AppendLine("RunAtStartup=" + (RunAtStartup ? "true" : "false"));
+        sb.AppendLine("PinnedWallpaper=" + PinnedWallpaper);
 
         string tmp = path + ".tmp";
         File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -124,6 +137,38 @@ internal sealed class AppConfig
         string language = trimmed.Substring(0, dash).ToLowerInvariant();
         string region = trimmed.Substring(dash + 1).ToUpperInvariant();
         return language + "-" + region;
+    }
+
+    /// <summary>
+    /// Keeps a hand edited PinnedWallpaper value to a bare file name. Anything that
+    /// carries a directory - "..\..\boot.ini", "C:\Windows\x.jpg" - is dropped
+    /// rather than repaired: the program writes this value itself, so one that does
+    /// not look like one is a mistake, not an instruction.
+    /// </summary>
+    private static string SanitizeFileName(string value)
+    {
+        string trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            // Path.GetFileName throws on invalid path characters here - the .NET
+            // Framework overload validates its argument, unlike the modern one.
+            if (string.Equals(Path.GetFileName(trimmed), trimmed, StringComparison.Ordinal))
+            {
+                return trimmed;
+            }
+        }
+        catch (ArgumentException)
+        {
+            // Falls through to the warning below.
+        }
+
+        Logger.Warn("Ignoring PinnedWallpaper, it is not a plain file name: " + trimmed);
+        return string.Empty;
     }
 
     private static Dictionary<string, string> ReadIni(string path)

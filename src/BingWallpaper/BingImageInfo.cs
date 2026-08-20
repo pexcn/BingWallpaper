@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using System.Text;
 
 namespace BingWallpaper;
@@ -70,6 +71,40 @@ internal sealed class BingImageInfo
         => StartDate + "_" + ImageId + "_" + AppConfig.ResolutionToString(resolution) + ".jpg";
 
     /// <summary>
+    /// The inverse of <see cref="GetFileName"/>. Needed when a picture has aged out
+    /// of the eight day window and its file name is the only metadata left: the id
+    /// never contains an underscore (see <see cref="Sanitize"/>), so the three
+    /// segments can always be told apart again.
+    /// </summary>
+    public static bool TryParseFileName(string fileName, out string startDate, out string imageId)
+    {
+        startDate = string.Empty;
+        imageId = string.Empty;
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return false;
+        }
+
+        string name = Path.GetFileNameWithoutExtension(fileName);
+        int first = name.IndexOf('_');
+        int last = name.LastIndexOf('_');
+        if (first <= 0 || last <= first)
+        {
+            return false;
+        }
+
+        string date = name.Substring(0, first);
+        if (date.Length != 8 || !IsAllDigits(date))
+        {
+            return false;
+        }
+
+        startDate = date;
+        imageId = name.Substring(first + 1, last - first - 1);
+        return true;
+    }
+
+    /// <summary>
     /// Pulls the market independent part out of a urlbase. Falls back to whatever
     /// follows the last "=" when the "OHR." marker is missing, and to a constant
     /// when nothing usable is left - a cache file has to have a name either way.
@@ -122,22 +157,43 @@ internal sealed class BingImageInfo
     }
 
     /// <summary>StartDate rendered as yyyy-MM-dd, or the raw value when unparsable.</summary>
-    public string DisplayDate
-    {
-        get
-        {
-            if (DateTime.TryParseExact(
-                    StartDate,
-                    "yyyyMMdd",
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.None,
-                    out DateTime parsed))
-            {
-                return parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            }
+    public string DisplayDate => FormatDate(StartDate);
 
-            return StartDate;
+    /// <summary>
+    /// Formats a yyyyMMdd token for display. Static because a pinned picture that
+    /// has left the eight day window has a date but no <see cref="BingImageInfo"/>
+    /// to hang it on.
+    /// </summary>
+    public static string FormatDate(string startDate)
+    {
+        if (DateTime.TryParseExact(
+                startDate,
+                "yyyyMMdd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateTime parsed))
+        {
+            return parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
+
+        return startDate;
+    }
+
+    /// <summary>
+    /// char.IsDigit would also accept Arabic-Indic and other Unicode digits, which
+    /// DateTime.TryParseExact then rejects.
+    /// </summary>
+    private static bool IsAllDigits(string value)
+    {
+        foreach (char c in value)
+        {
+            if (c < '0' || c > '9')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? Copyright : Title;

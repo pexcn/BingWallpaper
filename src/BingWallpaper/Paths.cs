@@ -98,6 +98,14 @@ internal static class Paths
     }
 
     /// <summary>
+    /// Turns a cached wallpaper file name into a full path. Every lookup goes
+    /// through here so that the day the pictures are split across sub folders, the
+    /// order they are searched in is defined in exactly one place.
+    /// </summary>
+    public static string ResolveWallpaperFile(string fileName)
+        => Path.Combine(WallpaperDirectory, fileName);
+
+    /// <summary>
     /// Replaces <paramref name="destination"/> with <paramref name="source"/>.
     /// File.Move has no overwrite overload on .NET Framework, and File.Replace is
     /// the atomic option when the destination already exists.

@@ -86,10 +86,10 @@ internal static class WallpaperService
 
     /// <summary>
     /// Deletes cached wallpapers older than <paramref name="keepDays"/>.
-    /// The file currently in use is never deleted, no matter how old it is.
-    /// keepDays == 0 means "keep forever" and skips the whole pass.
+    /// The files in <paramref name="protectedFiles"/> are never deleted, no matter
+    /// how old they are. keepDays == 0 means "keep forever" and skips the whole pass.
     /// </summary>
-    public static int Cleanup(string directory, int keepDays, string? protectedFile)
+    public static int Cleanup(string directory, int keepDays, IReadOnlyCollection<string>? protectedFiles)
     {
         if (keepDays <= 0)
         {
@@ -102,7 +102,7 @@ internal static class WallpaperService
             return 0;
         }
 
-        string? protectedFull = TryGetFullPath(protectedFile);
+        HashSet<string> protectedSet = BuildProtectedSet(protectedFiles);
 
         DateTime threshold = DateTime.UtcNow.AddDays(-keepDays);
         int deleted = 0;
@@ -111,8 +111,7 @@ internal static class WallpaperService
             foreach (string file in Directory.EnumerateFiles(directory, "*.jpg", SearchOption.TopDirectoryOnly))
             {
                 string full = Path.GetFullPath(file);
-                if (protectedFull is not null
-                    && string.Equals(full, protectedFull, StringComparison.OrdinalIgnoreCase))
+                if (protectedSet.Contains(full))
                 {
                     continue;
                 }
@@ -158,7 +157,10 @@ internal static class WallpaperService
     /// one, so no picture is ever lost here.
     /// </para>
     /// </summary>
-    public static int RemoveStaleResolutions(string directory, ResolutionKind resolution, string? protectedFile)
+    public static int RemoveStaleResolutions(
+        string directory,
+        ResolutionKind resolution,
+        IReadOnlyCollection<string>? protectedFiles)
     {
         if (!Directory.Exists(directory))
         {
@@ -166,7 +168,7 @@ internal static class WallpaperService
         }
 
         string keepSuffix = "_" + AppConfig.ResolutionToString(resolution) + ".jpg";
-        string? protectedFull = TryGetFullPath(protectedFile);
+        HashSet<string> protectedSet = BuildProtectedSet(protectedFiles);
         int deleted = 0;
 
         try
@@ -216,8 +218,7 @@ internal static class WallpaperService
                     }
 
                     string full = Path.GetFullPath(file);
-                    if (protectedFull is not null
-                        && string.Equals(full, protectedFull, StringComparison.OrdinalIgnoreCase))
+                    if (protectedSet.Contains(full))
                     {
                         continue;
                     }
@@ -261,6 +262,32 @@ internal static class WallpaperService
         WallpaperFit.Span => ("22", "0"),
         _ => ("10", "0"),
     };
+
+    /// <summary>
+    /// Normalizes the files a cleanup pass must leave alone. A set rather than a
+    /// single path because the wallpaper on the desktop and the pinned one are not
+    /// always the same file - they differ while a pinned picture is being restored
+    /// or downloaded again.
+    /// </summary>
+    private static HashSet<string> BuildProtectedSet(IReadOnlyCollection<string>? files)
+    {
+        HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (files is null)
+        {
+            return set;
+        }
+
+        foreach (string file in files)
+        {
+            string? full = TryGetFullPath(file);
+            if (full is not null)
+            {
+                set.Add(full);
+            }
+        }
+
+        return set;
+    }
 
     /// <summary>Normalizes a path for comparison, or null when there is nothing to protect.</summary>
     private static string? TryGetFullPath(string? path)

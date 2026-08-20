@@ -95,7 +95,8 @@ internal static class Program
                 " theme=" + config.Theme +
                 " interval=" + config.RefreshIntervalHours + "h" +
                 " keepDays=" + config.KeepDays +
-                " runAtStartup=" + config.RunAtStartup);
+                " runAtStartup=" + config.RunAtStartup +
+                " pinned=" + (config.IsPinned ? config.PinnedWallpaper : "no"));
 
             ThemeManager.Initialize(config.Theme);
 

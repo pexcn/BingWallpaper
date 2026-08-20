@@ -230,7 +230,7 @@ internal sealed class HistoryForm : Form
         ThemeManager.ApplyToControl(_grid);
         UpdateCurrentMarker();
 
-        SetStatus("共 " + _images.Count + " 天，点击任意一张即可设为壁纸。");
+        SetStatus("共 " + _images.Count + " 天，点击任意一张即可设为壁纸并固定。");
         _ = LoadThumbnailsAsync(_thumbnailCts.Token);
     }
 
@@ -241,12 +241,27 @@ internal sealed class HistoryForm : Form
         _status.Text = text;
     }
 
+    /// <summary>
+    /// Called by the tray context after the wallpaper or the pin changed, so the
+    /// badge follows an action taken from the tray menu while this window is open.
+    /// </summary>
+    public void RefreshCurrentMarker()
+    {
+        if (!IsDisposed)
+        {
+            UpdateCurrentMarker();
+        }
+    }
+
     private void UpdateCurrentMarker()
     {
         int current = _context.CurrentIndex;
+        bool pinned = _context.IsPinned;
         foreach (ThumbnailTile tile in _tiles)
         {
-            tile.IsCurrent = tile.Index == current;
+            bool isCurrent = tile.Index == current;
+            tile.IsCurrent = isCurrent;
+            tile.IsPinned = isCurrent && pinned;
         }
     }
 
@@ -333,7 +348,7 @@ internal sealed class HistoryForm : Form
         try
         {
             await _context.ApplyFromHistoryAsync(index).ConfigureAwait(true);
-            SetStatus("已应用：" + image.DisplayLine);
+            SetStatus((_context.IsPinned ? "已固定：" : "已应用：") + image.DisplayLine);
         }
         catch (Exception ex)
         {
