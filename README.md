@@ -43,14 +43,25 @@
 |---|---|---|---|
 | .NET Framework 4.8 + WinForms | ~200 KB | 否，系统内置 | 只能自绘，且托盘菜单做不到 |
 | .NET 10 + Avalonia，依赖框架 | ~2 MB | 是，需装 .NET 10 Runtime | 完整 |
-| .NET 10 + Avalonia + Native AOT（本项目） | 约 30 MB（压缩包约一半） | **否** | **完整** |
+| .NET 10 + Avalonia + Native AOT（本项目） | 34 MB（压缩包约 15 MB） | **否** | **完整** |
 
 代价写在明处：**体积从几百 KB 变成几十 MB**，而且不再是单个文件——Avalonia 的渲染
 （Skia / HarfBuzz / ANGLE）是原生库，Native AOT 无法把它们并进 exe，只能放在 exe 旁边。
 换来的是一整套自绘控件：深色模式不再靠拦截 uxtheme 的未文档化导出实现，托盘菜单终于也能是深色的，
 而且 Win10 与 Win11 表现一致。
 
-> exe 的确切大小以 CI 里 `Report published files` 步骤打印的为准；上表是量级。
+实测（v1.0.0，win-x64）：
+
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| `BingWallpaper.exe` | 17.2 MB | 程序本体，Native AOT 产物 |
+| `libSkiaSharp.dll` | 9.4 MB | 渲染 |
+| `av_libglesv2.dll` | 5.4 MB | ANGLE，GPU 后端 |
+| `libHarfBuzzSharp.dll` | 1.8 MB | 文字排版 |
+
+> 每次 CI 的 `Report published files` 步骤都会打印当次的实际大小。
+> 发布包里不含 `.pdb`：ILCompiler 生成的原生符号文件有 77 MB，比其余所有文件加起来还大，
+> 单独作为 CI artifact 保留，供需要看崩溃转储的人下载。
 
 托盘右键菜单：
 
