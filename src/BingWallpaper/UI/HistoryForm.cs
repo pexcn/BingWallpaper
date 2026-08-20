@@ -45,6 +45,9 @@ internal sealed class HistoryForm : Form
         ThemeManager.ApplySystemFont(this);
 
         Text = "BingWallpaper - 选择日期";
+        // Windows Forms does not inherit the icon of the executable: without this the
+        // title bar and the task bar show the default .NET Framework window icon.
+        Icon = AppIcon.Window;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;

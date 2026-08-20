@@ -164,6 +164,9 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   额外的 app.config 开关下才支持 PerMonitorV2，为保持单文件而放弃该特性（多显示器不同缩放时由系统拉伸）
 - 显式套用系统 UI 字体（`SystemFonts.MessageBoxFont`）：.NET Framework 的控件默认字体仍是
   MS Sans Serif 8.25pt
+- 图标是一个多分辨率 `.ico`（256/128/64/48/32/16），同一个文件既由 `ApplicationIcon` 编进 exe 的 Win32
+  资源（资源管理器、任务栏、Alt+Tab），也作为嵌入资源打包：托盘按当前 DPI 要 16/20/24 像素，而
+  `Icon.ExtractAssociatedIcon` 只会给出 32×32；窗口图标同样要显式赋值，WinForms 不继承 exe 图标
 - 深色模式手写实现：读取 `AppsUseLightTheme` 注册表值（只读）、监听 `WM_SETTINGCHANGE`/`ImmersiveColorSet`、
   `DwmSetWindowAttribute(20)` 深色标题栏、`SetWindowTheme` + uxtheme 未文档化序号导出（#135 / #133 / #104）。
   所有未文档化调用均包在 try/catch 中，失败时降级为浅色并记录日志

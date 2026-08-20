@@ -16,6 +16,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <!-- No NuGet packages, so no binding redirects and no .exe.config are needed. -->
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
@@ -34,6 +35,19 @@
     <NeutralLanguage>en-US</NeutralLanguage>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The same file twice: ApplicationIcon above puts it in the Win32 resources of
+      the executable (Explorer, task bar, Alt+Tab), this embeds it so the tray can
+      pick the frame that matches the current DPI. See UI/AppIcon.cs.
+      The logical name is spelled out instead of relying on the RootNamespace plus
+      folder convention.
+    -->
+    <EmbeddedResource Include="Resources\app.ico">
+      <LogicalName>BingWallpaper.Resources.app.ico</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 
   <ItemGroup>
     <!--

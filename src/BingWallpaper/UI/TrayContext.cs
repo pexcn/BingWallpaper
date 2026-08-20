@@ -92,7 +92,7 @@ internal sealed class TrayContext : ApplicationContext
 
         _tray = new NotifyIcon
         {
-            Icon = LoadTrayIcon(),
+            Icon = AppIcon.Tray,
             Text = "BingWallpaper",
             Visible = true,
             ContextMenuStrip = _menu,
@@ -512,24 +512,6 @@ internal sealed class TrayContext : ApplicationContext
 
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value.Substring(0, maxLength - 1) + "…";
-
-    private static Icon LoadTrayIcon()
-    {
-        try
-        {
-            Icon? icon = Icon.ExtractAssociatedIcon(Paths.ExecutablePath);
-            if (icon is not null)
-            {
-                return icon;
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn("Could not extract the application icon: " + ex.Message);
-        }
-
-        return SystemIcons.Application;
-    }
 }
 
 /// <summary>

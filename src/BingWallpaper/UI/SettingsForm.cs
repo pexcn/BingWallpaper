@@ -69,6 +69,7 @@ internal sealed class SettingsForm : Form
         ThemeManager.ApplySystemFont(this);
 
         Text = "BingWallpaper 设置";
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;

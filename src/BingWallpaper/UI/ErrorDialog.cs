@@ -21,6 +21,7 @@ internal static class ErrorDialog
             using Form form = new Form()
             {
                 Text = title,
+                Icon = AppIcon.Window,
                 StartPosition = FormStartPosition.CenterScreen,
                 Size = new Size(760, 480),
                 MinimumSize = new Size(480, 320),
