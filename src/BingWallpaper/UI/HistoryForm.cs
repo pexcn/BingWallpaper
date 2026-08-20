@@ -44,7 +44,7 @@ internal sealed class HistoryForm : Form
 
         ThemeManager.ApplySystemFont(this);
 
-        Text = "BingWallpaper - 选择日期";
+        Text = "必应壁纸 - 选择日期";
         // Windows Forms does not inherit the icon of the executable: without this the
         // title bar and the task bar show the default .NET Framework window icon.
         Icon = AppIcon.Window;
@@ -266,7 +266,7 @@ internal sealed class HistoryForm : Form
     {
         if (sender is ThumbnailTile tile)
         {
-            _status.Text = tile.Info.DisplayDate + "  " + tile.Info.DisplayTitle;
+            _status.Text = tile.Info.DisplayLine;
         }
     }
 
@@ -333,7 +333,7 @@ internal sealed class HistoryForm : Form
         try
         {
             await _context.ApplyFromHistoryAsync(index).ConfigureAwait(true);
-            SetStatus("已应用：" + image.DisplayDate + "  " + image.DisplayTitle);
+            SetStatus("已应用：" + image.DisplayLine);
         }
         catch (Exception ex)
         {

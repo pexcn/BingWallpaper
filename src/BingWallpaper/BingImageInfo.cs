@@ -68,5 +68,11 @@ internal sealed class BingImageInfo
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? Copyright : Title;
 
+    /// <summary>
+    /// Date and title on one line, for the places that show both. The middle dot
+    /// separates them; two spaces read as a gap the layout forgot to close.
+    /// </summary>
+    public string DisplayLine => DisplayDate + " · " + DisplayTitle;
+
     public override string ToString() => DisplayDate + " " + DisplayTitle;
 }

@@ -68,7 +68,7 @@ internal sealed class SettingsForm : Form
 
         ThemeManager.ApplySystemFont(this);
 
-        Text = "BingWallpaper 设置";
+        Text = "必应壁纸设置";
         Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -519,7 +519,7 @@ internal sealed class SettingsForm : Form
         catch (Exception ex)
         {
             Logger.Error("Could not save the configuration file.", ex);
-            ErrorDialog.Show("BingWallpaper - 保存设置失败", Logger.Describe(ex));
+            ErrorDialog.Show("必应壁纸 - 保存设置失败", Logger.Describe(ex));
             return;
         }
 

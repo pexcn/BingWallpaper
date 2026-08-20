@@ -93,7 +93,7 @@ internal sealed class TrayContext : ApplicationContext
         _tray = new NotifyIcon
         {
             Icon = AppIcon.Tray,
-            Text = "BingWallpaper",
+            Text = "必应壁纸",
             Visible = true,
             ContextMenuStrip = _menu,
         };
@@ -272,7 +272,7 @@ internal sealed class TrayContext : ApplicationContext
             _titleItem.Text = "刷新失败，详见日志文件";
             if (userInitiated)
             {
-                ErrorDialog.Show("BingWallpaper - 刷新失败", Logger.Describe(ex));
+                ErrorDialog.Show("必应壁纸 - 刷新失败", Logger.Describe(ex));
             }
         }
         finally
@@ -314,7 +314,7 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex)
         {
             Logger.Error("Could not switch the wallpaper.", ex);
-            ErrorDialog.Show("BingWallpaper - 切换壁纸失败", Logger.Describe(ex));
+            ErrorDialog.Show("必应壁纸 - 切换壁纸失败", Logger.Describe(ex));
         }
         finally
         {
@@ -344,8 +344,8 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (_appliedImage is not null)
         {
-            _titleItem.Text = Truncate(_appliedImage.DisplayDate + "  " + _appliedImage.DisplayTitle, 80);
-            _tray.Text = Truncate("BingWallpaper - " + _appliedImage.DisplayTitle, 63);
+            _titleItem.Text = Truncate(_appliedImage.DisplayLine, 80);
+            _tray.Text = Truncate("必应壁纸 - " + _appliedImage.DisplayTitle, 63);
         }
         else if (!_busy)
         {
