@@ -25,7 +25,7 @@
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，几百 KB）
+1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，约 200 KB）
 2. 放到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
 3. 双击运行，托盘出现图标后即开始工作
@@ -36,7 +36,7 @@
 
 | 方案 | 体积 | 是否需要安装运行时 |
 |---|---|---|
-| .NET Framework 4.8（本项目） | ~300 KB | **否**，Windows 10 1903+ 内置 |
+| .NET Framework 4.8（本项目） | ~200 KB | **否**，Windows 10 1903+ 内置 |
 | .NET 10，依赖框架 | ~280 KB | 是，需装 .NET 10 Desktop Runtime |
 | .NET 10，自包含单文件 | ~47 MB | 否 |
 
