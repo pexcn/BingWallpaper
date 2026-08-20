@@ -162,7 +162,7 @@ internal sealed class TrayContext : ApplicationContext
         Paths.EnsureWallpaperDirectory();
         string path = Path.Combine(
             Paths.WallpaperDirectory,
-            image.GetFileName(_config.Market, _config.Resolution));
+            image.GetFileName(_config.Resolution));
 
         bool cached = File.Exists(path) && new FileInfo(path).Length > 0;
         if (cached)
@@ -260,6 +260,7 @@ internal sealed class TrayContext : ApplicationContext
             await ApplyIndexAsync(0, force: userInitiated).ConfigureAwait(true);
 
             WallpaperService.Cleanup(Paths.WallpaperDirectory, _config.KeepDays, _appliedPath);
+            WallpaperService.RemoveStaleResolutions(Paths.WallpaperDirectory, _config.Resolution, _appliedPath);
             Logger.Info("=== refresh cycle done ===");
         }
         catch (OperationCanceledException)

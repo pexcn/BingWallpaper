@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -101,18 +102,7 @@ internal static class WallpaperService
             return 0;
         }
 
-        string? protectedFull = null;
-        if (!string.IsNullOrEmpty(protectedFile))
-        {
-            try
-            {
-                protectedFull = Path.GetFullPath(protectedFile);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn("Could not normalize the protected wallpaper path: " + ex.Message);
-            }
-        }
+        string? protectedFull = TryGetFullPath(protectedFile);
 
         DateTime threshold = DateTime.UtcNow.AddDays(-keepDays);
         int deleted = 0;
@@ -156,6 +146,110 @@ internal static class WallpaperService
         return deleted;
     }
 
+    /// <summary>
+    /// Removes the copies of a picture that are not in the configured resolution.
+    /// Toggling the resolution setting leaves a "_UHD" and a "_1920x1080" file of
+    /// the very same picture side by side; both decode to the same photo, so only
+    /// the configured one is worth keeping.
+    /// <para>
+    /// A group is only pruned when the copy in the current resolution is actually
+    /// present. That single condition is what makes the pass safe to run whatever
+    /// the retention setting says: it can remove a redundant copy, never the last
+    /// one, so no picture is ever lost here.
+    /// </para>
+    /// </summary>
+    public static int RemoveStaleResolutions(string directory, ResolutionKind resolution, string? protectedFile)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return 0;
+        }
+
+        string keepSuffix = "_" + AppConfig.ResolutionToString(resolution) + ".jpg";
+        string? protectedFull = TryGetFullPath(protectedFile);
+        int deleted = 0;
+
+        try
+        {
+            // Key: the file name without the resolution segment, i.e. one picture.
+            Dictionary<string, List<string>> groups =
+                new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (string file in Directory.EnumerateFiles(directory, "*.jpg", SearchOption.TopDirectoryOnly))
+            {
+                string name = Path.GetFileName(file);
+                int cut = name.LastIndexOf('_');
+                if (cut <= 0)
+                {
+                    continue;
+                }
+
+                string key = name.Substring(0, cut);
+                if (!groups.TryGetValue(key, out List<string>? members))
+                {
+                    members = new List<string>(2);
+                    groups[key] = members;
+                }
+
+                members.Add(file);
+            }
+
+            foreach (KeyValuePair<string, List<string>> group in groups)
+            {
+                if (group.Value.Count < 2)
+                {
+                    continue;
+                }
+
+                bool keeperPresent = group.Value.Exists(
+                    file => Path.GetFileName(file).EndsWith(keepSuffix, StringComparison.OrdinalIgnoreCase));
+                if (!keeperPresent)
+                {
+                    continue;
+                }
+
+                foreach (string file in group.Value)
+                {
+                    if (Path.GetFileName(file).EndsWith(keepSuffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string full = Path.GetFullPath(file);
+                    if (protectedFull is not null
+                        && string.Equals(full, protectedFull, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        File.Delete(full);
+                        deleted++;
+                        Logger.Info("Deleted redundant resolution: " + Path.GetFileName(full));
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn("Could not delete " + full + ": " + ex.Message);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Stale resolution pass failed.", ex);
+        }
+
+        if (deleted > 0)
+        {
+            Logger.Info(
+                "Stale resolution pass finished: " + deleted.ToString(CultureInfo.InvariantCulture) +
+                " file(s) removed (keeping " + AppConfig.ResolutionToString(resolution) + ").");
+        }
+
+        return deleted;
+    }
+
     /// <summary>Maps a fit mode to the registry values documented for HKCU\Control Panel\Desktop.</summary>
     public static (string WallpaperStyle, string TileWallpaper) GetStyleValues(WallpaperFit fit) => fit switch
     {
@@ -167,6 +261,25 @@ internal static class WallpaperService
         WallpaperFit.Span => ("22", "0"),
         _ => ("10", "0"),
     };
+
+    /// <summary>Normalizes a path for comparison, or null when there is nothing to protect.</summary>
+    private static string? TryGetFullPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("Could not normalize the protected wallpaper path: " + ex.Message);
+            return null;
+        }
+    }
 
     /// <summary>Localized (zh-CN) display name of a fit mode, used by the settings UI.</summary>
     public static string GetFitDisplayName(WallpaperFit fit) => fit switch

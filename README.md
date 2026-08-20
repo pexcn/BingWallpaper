@@ -70,8 +70,12 @@
 ├─ BingWallpaper.ini        # 配置，纯文本可手改
 ├─ BingWallpaper.log        # 日志（512KB 轮转，保留一个 BingWallpaper.log.1）
 └─ wallpapers\
-   └─ zh-CN_20260818_UHD.jpg
+   └─ 20260818_WhyteCliffP_UHD.jpg
 ```
+
+壁纸文件名是 `<日期>_<图片标识>_<分辨率>.jpg`，其中图片标识取自接口返回的 `OHR.` 标记，
+**跨市场相同**——同一张照片同时下发到 de-DE / en-IN / fr-FR 时，本地只会存一份，
+切换市场时命中已有文件就完全不联网下载。
 
 ### 配置文件
 
@@ -173,6 +177,11 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   `DwmSetWindowAttribute(20)` 深色标题栏、`SetWindowTheme` + uxtheme 未文档化序号导出（#135 / #133 / #104）。
   所有未文档化调用均包在 try/catch 中，失败时降级为浅色并记录日志
 - 图片身份使用接口返回的 `startdate` 而非本地日期（zh-CN 市场在 UTC 16:00 换图）
+- 缓存文件名不含市场代码：市场描述的是「从哪个频道拿到这张图」，不是图片本身的属性。
+  身份取 `urlbase` 里的 `OHR.<名称>` 标记（`/th?id=OHR.WhyteCliffP_ZH-CN0573407830` → `WhyteCliffP`），
+  它跨市场稳定，于是反复切换市场不会把同一张照片存成好几份
+- 切换分辨率后，同一张图的旧尺寸副本会被清掉——但**只在当前分辨率那份确实存在时**才删，
+  所以这一步只会去掉多余副本，永远不会删掉某张图的最后一份
 - 下载先写 `.tmp`、解码校验通过后再原子改名，避免半截文件被当作有效缓存
 - 全局异常钩子（`Application.ThreadException`、`AppDomain.UnhandledException`、`TaskScheduler.UnobservedTaskException`）
   会把完整异常链写入日志并弹出可复制文本的错误对话框

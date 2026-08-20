@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Text;
 
 namespace BingWallpaper;
 
@@ -12,6 +13,13 @@ internal sealed class BingImageInfo
 {
     public const string BingHost = "https://www.bing.com";
 
+    private const string IdMarker = "OHR.";
+
+    private const string FallbackImageId = "image";
+
+    /// <summary>Real tokens are far shorter; this only guards against a pathological urlbase.</summary>
+    private const int MaxImageIdLength = 64;
+
     /// <summary>yyyyMMdd, e.g. "20260818".</summary>
     public string StartDate { get; set; } = string.Empty;
 
@@ -22,6 +30,15 @@ internal sealed class BingImageInfo
 
     /// <summary>e.g. "/th?id=OHR.WhyteCliffP_ZH-CN0573407830" - the suffix is ours to choose.</summary>
     public string UrlBase { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Stable identity of the photo, taken from the "OHR.{name}" token of
+    /// <see cref="UrlBase"/> - "WhyteCliffP" for the example above. The same photo
+    /// carries the same token in every market; only the locale suffix differs.
+    /// Naming cache files after it is what keeps a picture that Bing publishes in
+    /// seven markets on the same day from being stored seven times.
+    /// </summary>
+    public string ImageId => ExtractImageId(UrlBase);
 
     public string Title { get; set; } = string.Empty;
 
@@ -43,9 +60,66 @@ internal sealed class BingImageInfo
     /// <summary>Small variant used for the history grid thumbnails.</summary>
     public string GetThumbnailUrl() => BingHost + UrlBase + "_400x240.jpg";
 
-    /// <summary>{market}_{startdate}_{UHD|1920x1080}.jpg</summary>
-    public string GetFileName(string market, ResolutionKind resolution)
-        => market + "_" + StartDate + "_" + AppConfig.ResolutionToString(resolution) + ".jpg";
+    /// <summary>
+    /// {startdate}_{imageId}_{UHD|1920x1080}.jpg
+    /// The market is deliberately absent: it describes the channel the image was
+    /// fetched through, not the image itself. Including it used to store one copy
+    /// per market of what is a single photo.
+    /// </summary>
+    public string GetFileName(ResolutionKind resolution)
+        => StartDate + "_" + ImageId + "_" + AppConfig.ResolutionToString(resolution) + ".jpg";
+
+    /// <summary>
+    /// Pulls the market independent part out of a urlbase. Falls back to whatever
+    /// follows the last "=" when the "OHR." marker is missing, and to a constant
+    /// when nothing usable is left - a cache file has to have a name either way.
+    /// </summary>
+    public static string ExtractImageId(string urlBase)
+    {
+        if (string.IsNullOrEmpty(urlBase))
+        {
+            return FallbackImageId;
+        }
+
+        int start = urlBase.IndexOf(IdMarker, StringComparison.OrdinalIgnoreCase);
+        start = start >= 0 ? start + IdMarker.Length : urlBase.LastIndexOf('=') + 1;
+
+        string id = urlBase.Substring(start);
+
+        // "WhyteCliffP_ZH-CN0573407830" -> "WhyteCliffP". The locale and the serial
+        // are what makes the same photo look different from market to market.
+        int suffix = id.LastIndexOf('_');
+        if (suffix > 0)
+        {
+            id = id.Substring(0, suffix);
+        }
+
+        return Sanitize(id);
+    }
+
+    /// <summary>
+    /// Reduces the token to ASCII letters, digits and dashes. Underscores are
+    /// dropped as well so that the three segments of a cache file name stay
+    /// unambiguous when split apart again.
+    /// </summary>
+    private static string Sanitize(string raw)
+    {
+        StringBuilder sb = new StringBuilder(raw.Length);
+        foreach (char c in raw)
+        {
+            if (c < 128 && (char.IsLetterOrDigit(c) || c == '-'))
+            {
+                sb.Append(c);
+            }
+
+            if (sb.Length == MaxImageIdLength)
+            {
+                break;
+            }
+        }
+
+        return sb.Length > 0 ? sb.ToString() : FallbackImageId;
+    }
 
     /// <summary>StartDate rendered as yyyy-MM-dd, or the raw value when unparsable.</summary>
     public string DisplayDate

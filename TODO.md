@@ -35,10 +35,10 @@
 ├─ BingWallpaper.log
 └─ wallpapers\
    ├─ daily\                      # 每日缓存，受 KeepDays 管辖
-   │  └─ zh-CN_20260818_UHD.jpg
+   │  └─ 20260818_WhitePocket_UHD.jpg
    └─ favorites\                  # 收藏，程序永不删除
       ├─ favorites.json
-      ├─ zh-CN_20260810_UHD.jpg
+      ├─ 20260810_MountainLake_UHD.jpg
       ├─ IMG_2034.jpg             # 用户自己拷进来的
       └─ .thumbs\                 # 缩略图缓存，可再生、允许程序删除
          └─ IMG_2034_thumb.jpg    # 命名格式为 源文件名_thumb.jpg
@@ -52,8 +52,36 @@
   原子且不占额外空间。`SystemParametersInfoW` 设完壁纸后不持有文件句柄（Windows 已转码到
   `TranscodedWallpaper`），所以移动「正在使用中」的壁纸是安全的；顺手重设一次注册表
   `Wallpaper` 路径保持记录准确。
-- **迁移**：启动时若 `wallpapers\` 顶层还有 `*.jpg`，一次性移进 `daily\` 并记日志。老用户无感。
-  注册表里的 `Wallpaper` 值会指向旧路径，但当前显示用的是转码副本，不受影响。
+- **不需要迁移旧文件**：程序尚未发布，没有存量用户。`wallpapers\` 顶层残留的文件由开发者
+  自行删除即可，不必为此写兼容代码。
+
+## 文件命名与跨市场去重（✅ 已实现）
+
+命名已改成 `<startdate>_<OHR名>_<分辨率>.jpg`，例如 `20260819_WhyteCliffP_UHD.jpg`——市场码
+从文件名里去掉了，因为市场描述的是*从哪个频道拿到这张图*，不是图片本身的属性。身份取
+`urlbase` 里的 `OHR.<名称>` 标记（`BingImageInfo.ExtractImageId`），跨市场稳定，于是同一张
+照片同时下发到 de-DE / en-IN / fr-FR 时本地只存一份，切换市场命中已有文件就完全不下载。
+
+清理器另加了 `WallpaperService.RemoveStaleResolutions`：切换分辨率后同一张图的旧尺寸副本会被
+删掉，**但只在当前分辨率那份确实存在时才删**，所以只会去掉多余副本，永不删掉某张图的最后一份。
+
+> 收藏功能实现时注意：这条分辨率规则**不能套用到 `favorites\`**，会违反核心不变量。
+
+### 遗留：内容哈希去重（可选，二期）
+
+上述方案只防止*新的*重复产生。同一张图在**不同日期**下发到不同市场时仍会存两份——少见，
+当时判断为可接受。真要根治就对 `daily\` 按 (文件大小 → SHA-256) 分组，同组只留一个。
+
+`favorites\` 不能自动删，只能在收藏视图里提示「发现 N 组重复，是否清理」，由用户点，
+删除时保留元数据最全的那个。
+
+> ⚠️ 前提是同一张图在不同市场下**字节一致**（大概率同源同编码器，但 id 不同意味着可能是
+> 不同 CDN 对象）。先实测：拿三张跨市场的同图 `certutil -hashfile` 比一下，再决定做不做。
+
+### 已否决：硬链接
+
+`CreateHardLink` 能保留各市场可读文件名而只占一份空间，但 README 明确支持 U 盘场景
+（FAT32 不支持硬链接），且删除语义容易搞混。不值得。
 
 ## favorites.json
 
@@ -65,8 +93,9 @@
   "version": 1,
   "items": [
     {
-      "file": "zh-CN_20260810_UHD.jpg",
+      "file": "20260810_MountainLake_UHD.jpg",
       "source": "bing",
+      "ohr": "MountainLake",
       "market": "zh-CN",
       "startdate": "20260810",
       "title": "晨雾中的黄山",
@@ -84,8 +113,10 @@
 }
 ```
 
-- **主键是 `file`**（文件名，Windows 下大小写不敏感比较）。不用 `market + startdate`——
-  用户自带的图没有这两个字段，而文件名是目录里唯一必然存在的东西。
+- **主键是 `file`**（文件名，Windows 下大小写不敏感比较）。不用 `ohr` 或 `market + startdate`——
+  用户自带的图没有这些字段，而文件名是目录里唯一必然存在的东西。
+- `market` / `title` / `copyright` 是**首次获取时那个市场**的值（同一张图在 de-DE 下标题是德文）。
+  不必纠结，记下来即可。
 - **读**用现成的 `JavaScriptSerializer`。
 - **写**要自己来：`JavaScriptSerializer` 只输出压缩成一行的 JSON，跟「纯文本可手改」的调性
   冲突，也不利于 git 备份看 diff。手写一个带缩进的输出器很小（JSON 字符串转义规则就
@@ -108,7 +139,7 @@
 
 ### 发现新文件时怎么补元数据（逐级降级）
 
-1. **文件名符合 `<market>_<startdate>_<res>.jpg`** → 反解出 market / startdate / resolution，
+1. **文件名符合 `<startdate>_<OHR名>_<res>.jpg`** → 反解出 startdate / ohr / resolution，
    `source: "bing"`。这覆盖了「从另一台机器的 favorites 目录拷过来」和「我们自己 move 进来
    但写 JSON 失败」两种情况。
 2. **且 startdate 还在最近 8 天窗口内** → 顺便向接口补齐 title / copyright / copyrightlink。
@@ -139,8 +170,10 @@
 
 `wallpapers\favorites\.thumbs\`，目录设 Hidden 属性。
 
-- **命名**：`<原文件全名>.jpg`，即 `IMG_2034.png` → `IMG_2034.png.jpg`。带扩展名避免
-  `a.jpg` 和 `a.png` 撞车。难看，但可读、可 grep、能一眼对上源文件，比哈希更合项目风格。
+- **命名**：`<源文件名>_thumb.jpg`，即 `IMG_2034.jpg` → `IMG_2034_thumb.jpg`。可读、可 grep、
+  能一眼对上源文件，比哈希更合项目风格。
+  - 唯一的坑：`a.jpg` 和 `a.png` 会撞到同一个 `a_thumb.jpg`。这种同名不同扩展名的组合极少见，
+    检测到时退化成带扩展名的 `a.png_thumb.jpg` 即可，不必为它改整套命名。
 - **失效**：缩略图 LastWriteTime 早于源文件就重生成（用户用同名文件覆盖时能正确更新）。
 - **生成时机**：**不在启动时做**。启动只做那趟不解码的对账；缩略图在收藏 tab 首次显示时
   按需生成，后台单线程队列，UI 先占位后替换。500 张图第一次打开会慢一会儿，之后全部命中。
@@ -198,7 +231,9 @@
 - **新增** `src/BingWallpaper/FavoritesStore.cs`——JSON 读写、目录对账、收藏 / 取消收藏。
 - **新增** 缩略图缓存逻辑（可放 `UI/ThumbnailCache.cs`）。
 - `Paths.cs`——新增 `daily\` / `favorites\` / `.thumbs\` 常量与迁移逻辑。
-- `WallpaperService.cs`——路径解析顺序、清理器只扫 `daily\`。
+- ~~`BingImageInfo.cs`——从 `urlbase` 解析 OHR 名、新命名。~~ ✅ 已完成
+- ~~`WallpaperService.cs`——分辨率去重。~~ ✅ 已完成
+- `WallpaperService.cs`——路径解析顺序（`favorites\` → `daily\`）、清理器只扫 `daily\`。
 - `UI/HistoryForm.cs`——分段控件 + 双视图（可考虑连类名一起改成 `PickerForm`）。
 - `UI/ThumbnailTile.cs`——星标叠加、右键菜单、占位态。
 - `UI/TrayContext.cs`——菜单项改名、收藏切换项。
