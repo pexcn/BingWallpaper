@@ -64,7 +64,7 @@ internal sealed class TrayContext : ApplicationContext
         _olderItem = new ToolStripMenuItem("上一张", null, (_, _) => MoveBy(1)) { Enabled = false };
         _historyItem = new ToolStripMenuItem("选择日期…", null, (_, _) => ShowHistory());
         _refreshItem = new ToolStripMenuItem("立即刷新", null, (_, _) => StartRefresh(userInitiated: true));
-        _folderItem = new ToolStripMenuItem("打开壁纸文件夹", null, (_, _) => OpenWallpaperFolder());
+        _folderItem = new ToolStripMenuItem("打开壁纸目录", null, (_, _) => OpenWallpaperFolder());
         _settingsItem = new ToolStripMenuItem("设置…", null, (_, _) => ShowSettings());
         _exitItem = new ToolStripMenuItem("退出", null, (_, _) => ExitApplication());
 
