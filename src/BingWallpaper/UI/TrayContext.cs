@@ -346,7 +346,7 @@ internal sealed class TrayContext : ApplicationContext
         if (_appliedImage is not null)
         {
             _titleItem.Text = Truncate(_appliedImage.DisplayLine, 80);
-            _tray.Text = Truncate("必应壁纸 - " + _appliedImage.DisplayTitle, 63);
+            _tray.Text = Truncate("必应壁纸 · " + _appliedImage.DisplayTitle, 63);
         }
         else if (!_busy)
         {
