@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 
 namespace BingWallpaper.UI;
 
@@ -82,6 +83,18 @@ public sealed partial class SettingsWindow : Window
         _sized = true;
         WindowSupport.ResizeToContent(this, Root, minWidth: 360, minHeight: 0);
         WindowSupport.Center(this);
+    }
+
+    private void OnEscape(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        HideWindow();
+    }
+
+    private void HideWindow()
+    {
+        AppWindow.Hide();
+        Hidden?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
@@ -271,11 +284,7 @@ public sealed partial class SettingsWindow : Window
             Persist(SettingKind.RunAtStartup);
         };
 
-        CloseButton.Click += (_, _) =>
-        {
-            AppWindow.Hide();
-            Hidden?.Invoke(this, EventArgs.Empty);
-        };
+        CloseButton.Click += (_, _) => HideWindow();
     }
 
     private void CommitMarket()
@@ -307,12 +316,8 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        // The theme is the one setting this window has to react to itself: the
-        // controller flips the palette, and every open window repaints.
+        // Only reports it - what a change means is the controller's business, and a
+        // theme change comes back to this window through ThemeManager.ThemeChanged.
         _changed(kind);
-        if (kind == SettingKind.Theme)
-        {
-            WindowSupport.ApplyTheme(this);
-        }
     }
 }

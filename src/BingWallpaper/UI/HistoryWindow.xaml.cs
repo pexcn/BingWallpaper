@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage.Streams;
 
@@ -98,6 +99,12 @@ public sealed partial class HistoryWindow : Window
     /// follows an action taken from the tray menu while this window is open.
     /// </summary>
     internal void RefreshCurrentMarker() => UpdateCurrentMarker();
+
+    private void OnEscape(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        AppWindow.Hide();
+    }
 
     private void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {

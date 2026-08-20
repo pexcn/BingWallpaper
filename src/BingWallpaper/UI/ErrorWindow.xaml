@@ -11,6 +11,9 @@
         never disappear behind a window that closes in a flash.
     -->
     <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" Padding="16">
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="Escape" Invoked="OnEscape" />
+        </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />

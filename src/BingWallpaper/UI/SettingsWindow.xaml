@@ -14,6 +14,10 @@
     <Grid x:Name="Root"
           Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
           Padding="24,20,24,16">
+        <Grid.KeyboardAccelerators>
+            <!-- Esc closes the window, the way every settings dialog does. -->
+            <KeyboardAccelerator Key="Escape" Invoked="OnEscape" />
+        </Grid.KeyboardAccelerators>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />

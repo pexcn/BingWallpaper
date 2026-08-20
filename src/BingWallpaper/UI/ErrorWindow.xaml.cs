@@ -1,5 +1,6 @@
 using System;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Input;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace BingWallpaper.UI;
@@ -58,6 +59,12 @@ public sealed partial class ErrorWindow : Window
             NativeMethods.ShowError(title, details);
             closed?.Invoke();
         }
+    }
+
+    private void OnEscape(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        Close();
     }
 
     private void CopyToClipboard()

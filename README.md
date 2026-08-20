@@ -27,7 +27,7 @@
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper-<版本>-win-x64.zip`
+1. 从 [Releases](../../releases) 下载 `BingWallpaper-<版本>-win-x64.zip`（约 69 MB，解压后约 166 MB）
 2. 解压到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
    - 压缩包里的文件要保持在一起：`BingWallpaper.exe` 需要同目录下的运行时文件，单独拷走 exe 无法启动
@@ -39,13 +39,17 @@
 
 | 方案 | 体积 | 是否需要安装运行时 |
 |---|---|---|
-| WinUI 3 + 自包含（本项目） | 约 100 MB 级的文件夹 | **否**，.NET 与 Windows App SDK 都在包内 |
+| WinUI 3 + 自包含（本项目） | 166 MB / 449 个文件（压缩包 69 MB） | **否**，.NET 与 Windows App SDK 都在包内 |
 | WinUI 3 + 依赖框架 | 数 MB | 是，需装 .NET Desktop Runtime **和** Windows App SDK 运行时 |
 | WinForms + .NET Framework 4.8（旧实现） | ~200 KB 单文件 | 否，Windows 10 1903+ 内置 |
 
 Windows 里**没有任何一个版本内置现代 .NET 或 Windows App SDK**，所以 WinUI 3 只能在
 「体积」和「免安装」之间二选一。本项目选择免安装：便携性（拷贝即用、删除文件夹即卸载）
 是这个项目存在的理由之一，让用户先去装两个运行时不能接受。
+
+项目引用的是 `Microsoft.WindowsAppSDK.WinUI` 组件包而不是 `Microsoft.WindowsAppSDK` 元包：
+后者代表「整个 SDK」，会把 AI、ML、Search、Widgets 一并塞进发布目录——光 `onnxruntime.dll`
+和 `DirectML.dll` 就是 40 MB。只引用 WinUI 之后是 166 MB，元包则是 222 MB。
 
 换来的是现代控件、原生高 DPI（PerMonitorV2）、系统一致的浅色/深色主题，
 以及不再需要为深色模式手写一整套自绘控件。
@@ -176,8 +180,12 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   `SelfContained`，运行时全部随程序发布
 - 不启用 `PublishTrimmed` / `PublishAot`：XAML 运行时按名字解析类型，裁剪后的构建会在运行时以
   编译期查不出来的方式失败，而体积本来就由两个运行时决定
+- 依赖只有一个：`Microsoft.WindowsAppSDK.WinUI`（连带 Base / Foundation / InteractiveExperiences），
+  不引元包，因此发布目录里没有 AI / ML / Search / Widgets 的运行时；DWriteCore 也不需要——
+  WinUI 链接的是系统自带的 `DWrite.dll`
 - 窗口用 XAML 描述、逻辑写在 code-behind 里，数据不走反射绑定：下拉框条目直接是 `ComboBoxItem`
-  （取值放在 `Tag` 里），只有历史网格的模板用了编译期绑定 `x:Bind`
+  （取值放在 `Tag` 里），只有历史网格的模板用了编译期绑定 `x:Bind`；三个窗口都能用 Esc 关闭
+  （`KeyboardAccelerator`）
 - **托盘图标与托盘菜单是纯 Win32**：WinUI 3 既没有托盘图标，也没有能脱离 XAML 窗口弹出的菜单，
   于是自己 `RegisterClassEx` + `Shell_NotifyIcon` + `CreatePopupMenu` / `TrackPopupMenuEx`。
   承载消息的窗口是一个隐藏的**顶层**窗口而不是 message-only 窗口——message-only 窗口收不到广播消息，
