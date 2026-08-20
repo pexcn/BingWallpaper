@@ -164,6 +164,12 @@ internal sealed class ThemedCheckBox : CheckBox
 
     public override Size GetPreferredSize(Size proposedSize)
     {
+        if (Text.Length == 0)
+        {
+            // Caption-less: a row label describes the box, so the glyph is all there is.
+            return new Size(GlyphSize + DpiScale.Round(4), GlyphSize + DpiScale.Round(6));
+        }
+
         Size text = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
         int height = Math.Max(GlyphSize, text.Height) + DpiScale.Round(6);
         return new Size(GlyphSize + Gap + text.Width + DpiScale.Round(4), height);
