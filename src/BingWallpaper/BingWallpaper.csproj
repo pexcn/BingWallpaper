@@ -28,7 +28,6 @@
     <RootNamespace>BingWallpaper</RootNamespace>
     <AssemblyTitle>必应壁纸</AssemblyTitle>
     <Product>必应壁纸</Product>
-    <Description>一个干净、绿色、开源的必应壁纸客户端。</Description>
     <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
     <Copyright>Copyright © 2026 pexcn · GPL-3.0-or-later</Copyright>
     <Version>1.0.0</Version>
