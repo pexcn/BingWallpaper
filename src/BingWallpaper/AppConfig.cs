@@ -108,7 +108,9 @@ internal sealed class AppConfig
     /// <summary>Normalizes a market code to the "xx-YY" shape Bing expects.</summary>
     public static string NormalizeMarket(string? market)
     {
-        if (string.IsNullOrWhiteSpace(market))
+        // string.IsNullOrWhiteSpace has no [NotNullWhen(false)] annotation in the
+        // .NET Framework reference assemblies, so the null check is written out.
+        if (market is null || market.Trim().Length == 0)
         {
             return "zh-CN";
         }
