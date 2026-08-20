@@ -44,30 +44,18 @@ jobs:
       - name: Build
         run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -warnaserror -p:Version=${{ steps.version.outputs.value }}
 
-      # Default download: bundles the .NET runtime, runs on a machine with nothing installed.
-      - name: Publish (self contained)
+      # .NET Framework 4.8 ships with Windows 10 1903+, so the published output is
+      # just the executable - no runtime to bundle, nothing to install.
+      - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
-      # Small download: needs the .NET Desktop Runtime to be installed.
-      # Single file compression is only supported for self contained apps, hence the override.
-      - name: Publish (framework dependent)
-        run: >
-          dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish-lite
-          -p:Version=${{ steps.version.outputs.value }}
-          -p:SelfContained=false
-          -p:EnableCompressionInSingleFile=false
-
-      - name: Rename framework dependent executable
-        shell: pwsh
-        run: Rename-Item publish-lite/BingWallpaper.exe BingWallpaper-lite.exe
-
-      - name: Report sizes
+      - name: Report published files
         shell: pwsh
         run: |
-          Get-ChildItem publish/BingWallpaper.exe, publish-lite/BingWallpaper-lite.exe |
-            ForEach-Object { "{0,-26} {1,10:N0} bytes ({2:N1} MB)" -f $_.Name, $_.Length, ($_.Length / 1MB) }
+          Get-ChildItem publish -Recurse |
+            ForEach-Object { "{0,-30} {1,10:N0} bytes" -f $_.Name, $_.Length }
 
-      - name: Self test (self contained)
+      - name: Self test
         shell: pwsh
         run: |
           $publish = (Resolve-Path publish).Path
@@ -91,53 +79,29 @@ jobs:
           }
           Write-Host 'Self test passed.'
 
-      - name: Self test (framework dependent)
-        shell: pwsh
-        run: |
-          $exe = Join-Path (Resolve-Path publish-lite).Path 'BingWallpaper-lite.exe'
-          Write-Host "Running $exe --selftest"
-          $process = Start-Process -FilePath $exe -ArgumentList '--selftest' -Wait -PassThru -NoNewWindow
-          if ($process.ExitCode -ne 0) {
-            Write-Error "Self test failed with exit code $($process.ExitCode)."
-            exit 1
-          }
-          Write-Host 'Self test passed.'
-
       - name: Clean self test leftovers
         shell: pwsh
         run: |
-          Get-ChildItem publish, publish-lite -Include 'BingWallpaper.log','BingWallpaper.log.1' -Recurse |
+          Get-ChildItem publish -Include 'BingWallpaper.log','BingWallpaper.log.1' -Recurse |
             Remove-Item -Force -ErrorAction SilentlyContinue
 
-      - name: Upload artifact (self contained)
+      - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: BingWallpaper-win-x64
+          name: BingWallpaper
           path: publish/BingWallpaper.exe
-          if-no-files-found: error
-
-      - name: Upload artifact (framework dependent)
-        uses: actions/upload-artifact@v7
-        with:
-          name: BingWallpaper-win-x64-lite
-          path: publish-lite/BingWallpaper-lite.exe
           if-no-files-found: error
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          files: |
-            publish/BingWallpaper.exe
-            publish-lite/BingWallpaper-lite.exe
+          files: publish/BingWallpaper.exe
           generate_release_notes: true
           body: |
-            BingWallpaper ${{ steps.version.outputs.value }} - portable, single file, win-x64.
+            BingWallpaper ${{ steps.version.outputs.value }}
 
-            | 下载 | 说明 |
-            |---|---|
-            | `BingWallpaper.exe` | 自包含，无需安装任何运行时，体积较大 |
-            | `BingWallpaper-lite.exe` | 体积极小，需要先安装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+            单个 exe，几百 KB，**无需安装任何运行时**：使用 .NET Framework 4.8，
+            它随 Windows 10 1903 及以上版本（含 LTSC 2021）内置。
 
-            两者功能完全相同。放到一个有写入权限的目录后直接运行即可，
-            配置、日志与壁纸都保存在程序所在目录。
+            放到一个有写入权限的目录后直接运行即可，配置、日志与壁纸都保存在程序所在目录。

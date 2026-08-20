@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -30,15 +31,15 @@ internal sealed class ThemedRadioButton : RadioButton
             true);
     }
 
-    private int GlyphSize => LogicalToDeviceUnits(15);
+    private static int GlyphSize => DpiScale.Round(15);
 
-    private int Gap => LogicalToDeviceUnits(7);
+    private static int Gap => DpiScale.Round(7);
 
     public override Size GetPreferredSize(Size proposedSize)
     {
         Size text = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
-        int height = Math.Max(GlyphSize, text.Height) + LogicalToDeviceUnits(6);
-        return new Size(GlyphSize + Gap + text.Width + LogicalToDeviceUnits(4), height);
+        int height = Math.Max(GlyphSize, text.Height) + DpiScale.Round(6);
+        return new Size(GlyphSize + Gap + text.Width + DpiScale.Round(4), height);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -72,7 +73,7 @@ internal sealed class ThemedRadioButton : RadioButton
             }
 
             Color border = !Enabled ? palette.Border : _hovered ? palette.Accent : palette.GlyphBorder;
-            using Pen pen = new(border, LogicalToDeviceUnits(1));
+            using Pen pen = new Pen(border, Math.Max(1, DpiScale.Round(1)));
             g.DrawEllipse(pen, glyph);
         }
 
@@ -131,15 +132,15 @@ internal sealed class ThemedCheckBox : CheckBox
             true);
     }
 
-    private int GlyphSize => LogicalToDeviceUnits(15);
+    private static int GlyphSize => DpiScale.Round(15);
 
-    private int Gap => LogicalToDeviceUnits(7);
+    private static int Gap => DpiScale.Round(7);
 
     public override Size GetPreferredSize(Size proposedSize)
     {
         Size text = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
-        int height = Math.Max(GlyphSize, text.Height) + LogicalToDeviceUnits(6);
-        return new Size(GlyphSize + Gap + text.Width + LogicalToDeviceUnits(4), height);
+        int height = Math.Max(GlyphSize, text.Height) + DpiScale.Round(6);
+        return new Size(GlyphSize + Gap + text.Width + DpiScale.Round(4), height);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -157,7 +158,7 @@ internal sealed class ThemedCheckBox : CheckBox
             using SolidBrush brush = new(Enabled ? palette.Accent : palette.SecondaryText);
             g.FillRectangle(brush, glyph);
 
-            using Pen tick = new(palette.GlyphMark, LogicalToDeviceUnits(2))
+            using Pen tick = new Pen(palette.GlyphMark, Math.Max(1, DpiScale.Round(2)))
             {
                 StartCap = LineCap.Round,
                 EndCap = LineCap.Round,
@@ -181,7 +182,7 @@ internal sealed class ThemedCheckBox : CheckBox
             }
 
             Color border = !Enabled ? palette.Border : _hovered ? palette.Accent : palette.GlyphBorder;
-            using Pen pen = new(border, LogicalToDeviceUnits(1));
+            using Pen pen = new Pen(border, Math.Max(1, DpiScale.Round(1)));
             g.DrawRectangle(pen, glyph);
         }
 

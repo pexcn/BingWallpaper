@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -32,12 +33,14 @@ internal static class ThemeManager
     {
         try
         {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(PersonalizeKeyPath, writable: false);
-            object? value = key?.GetValue(AppsUseLightThemeValue);
-            if (value is int number)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(PersonalizeKeyPath, writable: false))
             {
-                // 0 = dark, 1 = light. A missing value counts as light.
-                return number == 0;
+                object? value = key?.GetValue(AppsUseLightThemeValue);
+                if (value is int number)
+                {
+                    // 0 = dark, 1 = light. A missing value counts as light.
+                    return number == 0;
+                }
             }
         }
         catch (Exception ex)
@@ -103,6 +106,27 @@ internal static class ThemeManager
         ThemeMode.Dark => true,
         _ => IsSystemDark(),
     };
+
+    /// <summary>
+    /// Applies the real Windows UI font. .NET Framework still defaults controls to
+    /// MS Sans Serif 8.25pt, which looks dated and measures differently from the
+    /// font the rest of the system uses (Segoe UI / Microsoft YaHei UI 9pt).
+    /// </summary>
+    public static void ApplySystemFont(Control control)
+    {
+        try
+        {
+            Font? font = SystemFonts.MessageBoxFont;
+            if (font is not null)
+            {
+                control.Font = font;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("Could not apply the system UI font: " + ex.Message);
+        }
+    }
 
     /// <summary>Applies the palette to a whole window, including its title bar.</summary>
     public static void ApplyToForm(Form form)

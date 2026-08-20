@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 
 namespace BingWallpaper.Theme;
@@ -68,7 +69,7 @@ internal sealed class ThemePalette
     /// <summary>The dot/tick drawn on top of the accent fill.</summary>
     public Color GlyphMark { get; }
 
-    public static ThemePalette Light { get; } = new(
+    public static ThemePalette Light { get; } = new ThemePalette(
         isDark: false,
         windowBackground: SystemColors.Control,
         controlBackground: SystemColors.Window,
@@ -83,7 +84,7 @@ internal sealed class ThemePalette
         glyphBorder: Color.FromArgb(0x86, 0x86, 0x86),
         glyphMark: Color.White);
 
-    public static ThemePalette Dark { get; } = new(
+    public static ThemePalette Dark { get; } = new ThemePalette(
         isDark: true,
         windowBackground: Color.FromArgb(0x20, 0x20, 0x20),
         controlBackground: Color.FromArgb(0x2D, 0x2D, 0x2D),

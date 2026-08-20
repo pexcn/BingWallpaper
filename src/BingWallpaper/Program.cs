@@ -1,5 +1,10 @@
+using System;
 using System.Globalization;
+using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using BingWallpaper.Theme;
 using BingWallpaper.UI;
@@ -61,15 +66,6 @@ internal static class Program
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        try
-        {
-            // The manifest already declares PerMonitorV2; this is a no-op safety net.
-            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn("SetHighDpiMode failed: " + ex.Message);
-        }
 
         // Portable by contract: no silent fallback to %LOCALAPPDATA%.
         if (!Paths.IsBaseDirectoryWritable(out string? writeError))
@@ -150,7 +146,8 @@ internal static class Program
         {
             try
             {
-                Mutex mutex = new(initiallyOwned: true, prefix + SingleInstanceObject, out bool createdNew);
+                bool createdNew;
+                Mutex mutex = new Mutex(true, prefix + SingleInstanceObject, out createdNew);
                 if (!createdNew)
                 {
                     mutex.Dispose();
@@ -160,9 +157,9 @@ internal static class Program
 
                 _instanceMutex = mutex;
                 _activateEvent = new EventWaitHandle(
-                    initialState: false,
-                    mode: EventResetMode.AutoReset,
-                    name: prefix + ActivateObject);
+                    false,
+                    EventResetMode.AutoReset,
+                    prefix + ActivateObject);
                 Logger.Debug("Single instance guard uses the " + prefix.TrimEnd('\\') + " namespace.");
                 return true;
             }
@@ -183,7 +180,8 @@ internal static class Program
     {
         try
         {
-            if (EventWaitHandle.TryOpenExisting(eventName, out EventWaitHandle? handle) && handle is not null)
+            EventWaitHandle? handle;
+            if (EventWaitHandle.TryOpenExisting(eventName, out handle) && handle is not null)
             {
                 using (handle)
                 {
@@ -207,7 +205,7 @@ internal static class Program
             return;
         }
 
-        Thread thread = new(() =>
+        Thread thread = new Thread(() =>
         {
             while (true)
             {
@@ -300,7 +298,7 @@ internal static class Program
                 return;
             }
 
-            StreamWriter writer = new(Console.OpenStandardOutput()) { AutoFlush = true };
+            StreamWriter writer = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
             Console.SetOut(writer);
             Console.SetError(writer);
         }

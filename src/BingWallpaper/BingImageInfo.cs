@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 
 namespace BingWallpaper;
@@ -12,24 +13,24 @@ internal sealed class BingImageInfo
     public const string BingHost = "https://www.bing.com";
 
     /// <summary>yyyyMMdd, e.g. "20260818".</summary>
-    public string StartDate { get; init; } = string.Empty;
+    public string StartDate { get; set; } = string.Empty;
 
     /// <summary>yyyyMMddHHmm, e.g. "202608181600".</summary>
-    public string FullStartDate { get; init; } = string.Empty;
+    public string FullStartDate { get; set; } = string.Empty;
 
-    public string EndDate { get; init; } = string.Empty;
+    public string EndDate { get; set; } = string.Empty;
 
     /// <summary>e.g. "/th?id=OHR.WhyteCliffP_ZH-CN0573407830" - the suffix is ours to choose.</summary>
-    public string UrlBase { get; init; } = string.Empty;
+    public string UrlBase { get; set; } = string.Empty;
 
-    public string Title { get; init; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
 
-    public string Copyright { get; init; } = string.Empty;
+    public string Copyright { get; set; } = string.Empty;
 
-    public string CopyrightLink { get; init; } = string.Empty;
+    public string CopyrightLink { get; set; } = string.Empty;
 
     /// <summary>Whether Bing marks the image as allowed to be used as a wallpaper.</summary>
-    public bool Wp { get; init; } = true;
+    public bool Wp { get; set; } = true;
 
     /// <summary>
     /// Builds the download URL from <see cref="UrlBase"/>. The "url" field of the

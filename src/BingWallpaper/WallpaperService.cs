@@ -1,4 +1,6 @@
+using System;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
@@ -29,11 +31,17 @@ internal static class WallpaperService
         try
         {
             // Step 1: style first.
-            using RegistryKey key = Registry.CurrentUser.CreateSubKey(DesktopKeyPath, writable: true)
-                                   ?? throw new InvalidOperationException(
-                                       @"Could not open HKCU\Control Panel\Desktop.");
-            key.SetValue("WallpaperStyle", style, RegistryValueKind.String);
-            key.SetValue("TileWallpaper", tile, RegistryValueKind.String);
+            using (RegistryKey? key = Registry.CurrentUser.CreateSubKey(DesktopKeyPath, writable: true))
+            {
+                if (key is null)
+                {
+                    throw new InvalidOperationException(@"Could not open HKCU\Control Panel\Desktop.");
+                }
+
+                key.SetValue("WallpaperStyle", style, RegistryValueKind.String);
+                key.SetValue("TileWallpaper", tile, RegistryValueKind.String);
+            }
+
             Logger.Info("Wallpaper style set: fit=" + fit + " WallpaperStyle=" + style + " TileWallpaper=" + tile);
         }
         catch (Exception ex)
@@ -63,8 +71,10 @@ internal static class WallpaperService
     {
         try
         {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(DesktopKeyPath, writable: false);
-            return key?.GetValue("Wallpaper") as string;
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(DesktopKeyPath, writable: false))
+            {
+                return key?.GetValue("Wallpaper") as string;
+            }
         }
         catch (Exception ex)
         {
@@ -119,7 +129,7 @@ internal static class WallpaperService
 
                 try
                 {
-                    FileInfo info = new(full);
+                    FileInfo info = new FileInfo(full);
                     if (info.LastWriteTimeUtc >= threshold)
                     {
                         continue;

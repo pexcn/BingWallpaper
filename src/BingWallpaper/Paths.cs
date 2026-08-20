@@ -1,3 +1,7 @@
+using System;
+using System.IO;
+using System.Reflection;
+
 namespace BingWallpaper;
 
 /// <summary>
@@ -12,17 +16,29 @@ internal static class Paths
 
     static Paths()
     {
-        // Environment.ProcessPath points at the real exe even for single-file
-        // publishes (AppContext.BaseDirectory may point at the extraction dir).
-        string? exe = Environment.ProcessPath;
+        string? exe = null;
+        try
+        {
+            exe = Assembly.GetEntryAssembly()?.Location;
+        }
+        catch (Exception)
+        {
+            exe = null;
+        }
+
+        if (string.IsNullOrEmpty(exe))
+        {
+            exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+        }
+
         if (!string.IsNullOrEmpty(exe))
         {
-            ExecutablePath = Path.GetFullPath(exe);
-            BaseDirectory = Path.GetDirectoryName(ExecutablePath) ?? AppContext.BaseDirectory;
+            ExecutablePath = Path.GetFullPath(exe!);
+            BaseDirectory = Path.GetDirectoryName(ExecutablePath) ?? AppDomain.CurrentDomain.BaseDirectory;
         }
         else
         {
-            BaseDirectory = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+            BaseDirectory = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
             ExecutablePath = Path.Combine(BaseDirectory, "BingWallpaper.exe");
         }
     }
@@ -48,7 +64,7 @@ internal static class Paths
         string probe = Path.Combine(BaseDirectory, ".write-probe-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
-            using (FileStream fs = new(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (FileStream fs = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 fs.WriteByte(0);
             }
@@ -67,7 +83,7 @@ internal static class Paths
                     File.Delete(probe);
                 }
             }
-            catch
+            catch (Exception)
             {
                 // Nothing else to do - the directory is not writable anyway.
             }
@@ -79,5 +95,32 @@ internal static class Paths
     public static void EnsureWallpaperDirectory()
     {
         Directory.CreateDirectory(WallpaperDirectory);
+    }
+
+    /// <summary>
+    /// Replaces <paramref name="destination"/> with <paramref name="source"/>.
+    /// File.Move has no overwrite overload on .NET Framework, and File.Replace is
+    /// the atomic option when the destination already exists.
+    /// </summary>
+    public static void MoveOverwrite(string source, string destination)
+    {
+        if (File.Exists(destination))
+        {
+            try
+            {
+                File.Replace(source, destination, null);
+                return;
+            }
+            catch (IOException)
+            {
+                File.Delete(destination);
+            }
+            catch (PlatformNotSupportedException)
+            {
+                File.Delete(destination);
+            }
+        }
+
+        File.Move(source, destination);
     }
 }

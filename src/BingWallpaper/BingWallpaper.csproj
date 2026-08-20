@@ -2,35 +2,24 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
+    <!--
+      .NET Framework 4.8 on purpose: it is the newest runtime that ships *inside*
+      Windows 10 (1903 and later, which includes LTSC 2021 / build 19044), so the
+      executable stays a couple of hundred KB and needs no runtime install.
+      No version of modern .NET (5 through 10) is part of Windows, which is why a
+      .NET 10 build either needs a runtime install or a ~47 MB self contained exe.
+      4.8.1 is not an option: it is only in-box on Windows 11 22H2 and later.
+    -->
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <PublishTrimmed>false</PublishTrimmed>
+    <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <!--
-      InvariantGlobalization is deliberately NOT enabled. In invariant mode
-      CultureInfo.GetCultureInfo(lcid) throws, and WinForms calls it from
-      Control.WmInputLangChange whenever the user switches the keyboard layout
-      or IME while a text control has focus - which crashed the settings window
-      with CultureNotFoundException (0x0804 = zh-CN). On Windows 10 1903+ .NET
-      uses the ICU that ships with the OS, so keeping globalization enabled
-      costs no measurable binary size here.
-    -->
-    <!--
-      WFO0003 asks to declare high DPI awareness either in the manifest or through
-      the project property, not both. Both are declared on purpose: the manifest
-      entry takes effect before any managed code runs, and the project property
-      keeps the WinForms tooling in sync. The duplication is consistent
-      (PerMonitorV2 in both places), so the warning is suppressed.
-    -->
-    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <!-- No NuGet packages, so no binding redirects and no .exe.config are needed. -->
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -43,11 +32,19 @@
     <Copyright>Copyright (c) BingWallpaper contributors</Copyright>
     <Version>1.0.0</Version>
     <NeutralLanguage>en-US</NeutralLanguage>
-    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <DebugType>embedded</DebugType>
-    <LangVersion>latest</LangVersion>
-    <!-- Reproducible-ish output; keeps the published tree to a single exe. -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Framework assemblies that ship with Windows. System.Drawing, System.Core and
+      friends are referenced by the SDK already; these three are not.
+      System.Web.Extensions provides JavaScriptSerializer, which replaces
+      System.Text.Json (that one is not part of .NET Framework).
+    -->
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
 
 </Project>

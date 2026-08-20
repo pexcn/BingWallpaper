@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Microsoft.Win32;
 
 namespace BingWallpaper;
@@ -20,8 +22,10 @@ internal static class AutoStartManager
     {
         try
         {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
-            return key?.GetValue(ValueName) as string;
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false))
+            {
+                return key?.GetValue(ValueName) as string;
+            }
         }
         catch (Exception ex)
         {
@@ -39,9 +43,16 @@ internal static class AutoStartManager
         string command = "\"" + Paths.ExecutablePath + "\"";
         try
         {
-            using RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
-                                   ?? throw new InvalidOperationException("Could not open the Run registry key.");
-            key.SetValue(ValueName, command, RegistryValueKind.String);
+            using (RegistryKey? key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true))
+            {
+                if (key is null)
+                {
+                    throw new InvalidOperationException("Could not open the Run registry key.");
+                }
+
+                key.SetValue(ValueName, command, RegistryValueKind.String);
+            }
+
             Logger.Info("Auto start enabled: " + command);
             return true;
         }
@@ -57,18 +68,16 @@ internal static class AutoStartManager
     {
         try
         {
-            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-            if (key is null)
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true))
             {
-                return true;
+                if (key is null || key.GetValue(ValueName) is null)
+                {
+                    return true;
+                }
+
+                key.DeleteValue(ValueName, throwOnMissingValue: false);
             }
 
-            if (key.GetValue(ValueName) is null)
-            {
-                return true;
-            }
-
-            key.DeleteValue(ValueName, throwOnMissingValue: false);
             Logger.Info("Auto start disabled, Run value removed.");
             return true;
         }
@@ -128,7 +137,7 @@ internal static class AutoStartManager
         if (value.Length >= 2 && value[0] == '"')
         {
             int closing = value.IndexOf('"', 1);
-            value = closing > 0 ? value[1..closing] : value[1..];
+            value = closing > 0 ? value.Substring(1, closing - 1) : value.Substring(1);
         }
         else
         {
@@ -136,7 +145,7 @@ internal static class AutoStartManager
             if (space > 0 && value.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == false)
             {
                 // Unquoted value with arguments: keep the first token only.
-                value = value[..space];
+                value = value.Substring(0, space);
             }
         }
 

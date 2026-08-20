@@ -16,36 +16,36 @@
 - 六种填充方式：填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨区
 - 手写深色模式，**在 Windows 10 上同样有效**（不依赖仅 Windows 11 可用的 `Application.SetColorMode`），可跟随系统实时切换
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹 = 完整卸载
-- 零第三方依赖（仅 BCL + P/Invoke），单文件 exe，提供「自包含」与「精简」两种下载
+- 零第三方依赖（仅 BCL + P/Invoke），**单个几百 KB 的 exe，无需安装任何运行时**
 
 ## 系统要求
 
-- Windows 10 LTSC 2021（build 19044）及以上，64 位
+- Windows 10 1903（build 18362）及以上，64 位；**Windows 10 LTSC 2021（19044）满足要求**
+- **无需安装 .NET 运行时**：程序基于 .NET Framework 4.8，该版本自 Windows 10 1903 起随系统内置
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载其中一个：
-
-   | 文件 | 体积 | 说明 |
-   |---|---|---|
-   | `BingWallpaper.exe` | ~47 MB | **自包含**，把 .NET 运行时打包在里面，目标机器不需要装任何东西 |
-   | `BingWallpaper-lite.exe` | ~280 KB | **精简版**，需要先安装 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
-
-   两者功能完全相同，选一个即可。
-
+1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，几百 KB）
 2. 放到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
 3. 双击运行，托盘出现图标后即开始工作
 
-### 为什么自包含版本有 40 多 MB？
+### 为什么用 .NET Framework 4.8 而不是 .NET 10？
 
-因为它把整个 .NET 运行时和 WinForms 一起打进了同一个 exe：CoreCLR、BCL、
-`System.Windows.Forms.dll`、`System.Drawing` 等等，加起来就是这个量级（已开启单文件压缩）。
-程序自身的代码只有 280 KB 左右——这正是 `BingWallpaper-lite.exe` 的大小，它把运行时
-交给系统上已安装的 .NET Desktop Runtime。
+因为要做到「体积小 **且** 免安装」，在 Windows 上只有这一条路：
 
-这是「免安装」与「体积小」之间的取舍，没有中间地带：几百 KB 的自包含 WinForms 程序不存在。
-（`PublishTrimmed` 也帮不上忙：WinForms 大量依赖反射，官方不支持裁剪，裁了会在运行时随机炸。）
+| 方案 | 体积 | 是否需要安装运行时 |
+|---|---|---|
+| .NET Framework 4.8（本项目） | ~300 KB | **否**，Windows 10 1903+ 内置 |
+| .NET 10，依赖框架 | ~280 KB | 是，需装 .NET 10 Desktop Runtime |
+| .NET 10，自包含单文件 | ~47 MB | 否 |
+
+.NET 5 及以后（.NET Core 血统）**没有任何版本内置于 Windows**，所以「把 .NET 10 降到 .NET 8」并不能免安装。
+能免安装的最高版本就是 .NET Framework 4.8——4.8.1 只在 Windows 11 22H2+ 内置，Win10 上仍需手动安装。
+体积小的开源 Windows 工具（例如 shadowsocks-windows 4.x）走的也是同一条路。
+
+代价是 .NET Framework 不再演进，且缺少一些现代 API；本项目相应地自己实现了 JSON 解析之外的
+兼容处理（见「技术说明」）。
 
 托盘右键菜单：
 
@@ -134,8 +134,6 @@ BingWallpaper.exe --help
 
 除此之外，本程序不写入 `%APPDATA%`、`%LOCALAPPDATA%`、「我的图片」或任何程序目录之外的位置。
 
-> 例外说明：`%TEMP%\.net\` 下的解压目录是 .NET 单文件发布机制的固有行为，由运行时管理，与本程序逻辑无关。
-
 ### Windows 自己写入的位置（不是本程序所为）
 
 只要**任何**程序（包括系统「个性化」面板）设置了壁纸，Windows 就会自行写入以下位置：
@@ -153,26 +151,28 @@ BingWallpaper.exe --help
 
 ## 构建
 
-需要 .NET 10 SDK（Windows）：
+需要 .NET SDK（用于 `dotnet` 命令）与 .NET Framework 4.8 目标包（Visual Studio 或 Build Tools 自带）：
 
 ```powershell
 dotnet build   src/BingWallpaper/BingWallpaper.csproj -c Release
-
-# 自包含版（默认）
 dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish
-
-# 精简版（需要目标机器已安装 .NET 10 Desktop Runtime）
-dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish-lite `
-  -p:SelfContained=false -p:EnableCompressionInSingleFile=false
 ```
 
-两个产物都是单文件 win-x64 可执行程序，均未启用裁剪。
+产物是单个 `publish\BingWallpaper.exe`，没有附带 DLL，也没有 `.exe.config`。
 
-CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建两个版本并分别运行 `--selftest`；打 `v*` 标签时会把两个 exe 都挂到 GitHub Release 上（可直接 `curl -LO` 的公开直链），同时保留 artifact 上传。
+CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建并运行 `--selftest`，
+且以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把 exe 挂到 GitHub Release 上
+（可直接 `curl -LO` 的公开直链），同时保留 artifact 上传。
 
 ## 技术说明
 
-- C# + WinForms（`net10.0-windows`），UI 全部由代码构建，无窗体设计器、无 `.Designer.cs`
+- C# + WinForms（`net48`，C# 最新语言版本），UI 全部由代码构建，无窗体设计器、无 `.Designer.cs`
+- JSON 用 `JavaScriptSerializer`（`System.Web.Extensions`，随 .NET Framework 内置）解析，
+  因为 `System.Text.Json` 不属于 .NET Framework，而本项目不引入任何 NuGet 包
+- 按系统 DPI 感知（`dpiAware=true`）+ `AutoScaleMode.Dpi` 缩放；.NET Framework 的 WinForms 只有在
+  额外的 app.config 开关下才支持 PerMonitorV2，为保持单文件而放弃该特性（多显示器不同缩放时由系统拉伸）
+- 显式套用系统 UI 字体（`SystemFonts.MessageBoxFont`）：.NET Framework 的控件默认字体仍是
+  MS Sans Serif 8.25pt
 - 深色模式手写实现：读取 `AppsUseLightTheme` 注册表值（只读）、监听 `WM_SETTINGCHANGE`/`ImmersiveColorSet`、
   `DwmSetWindowAttribute(20)` 深色标题栏、`SetWindowTheme` + uxtheme 未文档化序号导出（#135 / #133 / #104）。
   所有未文档化调用均包在 try/catch 中，失败时降级为浅色并记录日志
@@ -182,9 +182,8 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   会把完整异常链写入日志并弹出可复制文本的错误对话框
 - 单选框 / 复选框为自绘控件：系统绘制的字形在深色背景下会变成「黑底黑点」，自绘后选中态在两种主题下
   都是强调色蓝
-- **未启用** `InvariantGlobalization`：不变模式下 `CultureInfo.GetCultureInfo(lcid)` 会抛异常，而 WinForms
-  在切换输入法 / 键盘布局时（`WM_INPUTLANGCHANGE`）必定会调用它，会直接崩溃。Windows 10 1903+ 的 .NET
-  使用系统自带的 ICU，因此保留完整全球化几乎不增加体积
+- 全球化功能保持启用：曾经开启的 `InvariantGlobalization`（.NET 10 时期）会让 WinForms 在切换输入法
+  （`WM_INPUTLANGCHANGE` → `CultureInfo.GetCultureInfo(lcid)`）时直接崩溃
 
 ## 免责声明
 

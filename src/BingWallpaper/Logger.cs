@@ -1,4 +1,6 @@
+using System;
 using System.Globalization;
+using System.IO;
 using System.Text;
 
 namespace BingWallpaper;
@@ -21,7 +23,7 @@ internal static class Logger
     private const long MaxFileBytes = 512 * 1024;
 
     private static readonly object Sync = new();
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private static string? _filePath;
     private static bool _fileDisabled;
@@ -57,7 +59,7 @@ internal static class Logger
             return "(no exception)";
         }
 
-        StringBuilder sb = new();
+        StringBuilder sb = new StringBuilder();
         int depth = 0;
         Exception? current = ex;
         while (current is not null && depth < 10)
@@ -135,7 +137,7 @@ internal static class Logger
 
     private static void RotateIfNeeded(string path)
     {
-        FileInfo info = new(path);
+        FileInfo info = new FileInfo(path);
         if (!info.Exists || info.Length < MaxFileBytes)
         {
             return;

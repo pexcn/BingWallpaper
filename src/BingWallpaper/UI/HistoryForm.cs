@@ -1,5 +1,10 @@
+using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using BingWallpaper.Theme;
 
@@ -11,7 +16,7 @@ namespace BingWallpaper.UI;
 /// </summary>
 internal sealed class HistoryForm : Form
 {
-    private static readonly Size ThumbnailSize = new(200, 120);
+    private static readonly Size ThumbnailSize = new Size(DpiScale.Round(200), DpiScale.Round(120));
 
     private readonly TrayContext _context;
     private readonly ListView _list = new();
@@ -27,10 +32,12 @@ internal sealed class HistoryForm : Form
     {
         _context = context;
 
+        ThemeManager.ApplySystemFont(this);
+
         Text = "BingWallpaper - 选择日期";
         StartPosition = FormStartPosition.CenterScreen;
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(760, 520);
         MinimumSize = new Size(520, 360);
         ShowInTaskbar = true;
@@ -143,7 +150,9 @@ internal sealed class HistoryForm : Form
     }
 
     private static string BuildSignature(IReadOnlyList<BingImageInfo> images)
-        => images.Count == 0 ? string.Empty : images.Count + ":" + images[0].StartDate + ":" + images[^1].StartDate;
+        => images.Count == 0
+            ? string.Empty
+            : images.Count + ":" + images[0].StartDate + ":" + images[images.Count - 1].StartDate;
 
     private void Populate(IReadOnlyList<BingImageInfo> images)
     {
@@ -200,9 +209,11 @@ internal sealed class HistoryForm : Form
                     return;
                 }
 
-                using Bitmap thumbnail = CreateThumbnail(bytes);
-                _thumbnails.Images.Add(thumbnail);
-                _list.Items[i].ImageIndex = _thumbnails.Images.Count - 1;
+                using (Bitmap thumbnail = CreateThumbnail(bytes))
+                {
+                    _thumbnails.Images.Add(thumbnail);
+                    _list.Items[i].ImageIndex = _thumbnails.Images.Count - 1;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -217,16 +228,18 @@ internal sealed class HistoryForm : Form
 
     private static Bitmap CreateThumbnail(byte[] bytes)
     {
-        using MemoryStream stream = new(bytes);
-        using Image source = Image.FromStream(stream);
-        Bitmap target = new(ThumbnailSize.Width, ThumbnailSize.Height);
-        using (Graphics graphics = Graphics.FromImage(target))
+        using (MemoryStream stream = new MemoryStream(bytes))
+        using (Image source = Image.FromStream(stream))
         {
-            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            graphics.DrawImage(source, 0, 0, ThumbnailSize.Width, ThumbnailSize.Height);
-        }
+            Bitmap target = new Bitmap(ThumbnailSize.Width, ThumbnailSize.Height);
+            using (Graphics graphics = Graphics.FromImage(target))
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(source, 0, 0, ThumbnailSize.Width, ThumbnailSize.Height);
+            }
 
-        return target;
+            return target;
+        }
     }
 
     private void OnListMouseClick(object? sender, MouseEventArgs e)
@@ -278,5 +291,5 @@ internal sealed class HistoryForm : Form
     }
 
     private static string Shorten(string value)
-        => value.Length <= 18 ? value : value[..17] + "…";
+        => value.Length <= 18 ? value : value.Substring(0, 17) + "…";
 }

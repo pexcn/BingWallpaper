@@ -1,6 +1,11 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using BingWallpaper.Theme;
 
@@ -59,6 +64,12 @@ internal sealed class TrayContext : ApplicationContext
         _exitItem = new ToolStripMenuItem("退出", null, (_, _) => ExitApplication());
 
         _menu = new ContextMenuStrip();
+        Font? menuFont = SystemFonts.MenuFont;
+        if (menuFont is not null)
+        {
+            _menu.Font = menuFont;
+        }
+
         _menu.Items.AddRange(new ToolStripItem[]
         {
             _titleItem,
@@ -485,7 +496,7 @@ internal sealed class TrayContext : ApplicationContext
 
     private int GetIntervalMilliseconds()
     {
-        int hours = Math.Clamp(
+        int hours = AppConfig.Clamp(
             _config.RefreshIntervalHours,
             AppConfig.MinRefreshIntervalHours,
             AppConfig.MaxRefreshIntervalHours);
@@ -493,7 +504,7 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     private static string Truncate(string value, int maxLength)
-        => value.Length <= maxLength ? value : value[..(maxLength - 1)] + "…";
+        => value.Length <= maxLength ? value : value.Substring(0, maxLength - 1) + "…";
 
     private static Icon LoadTrayIcon()
     {

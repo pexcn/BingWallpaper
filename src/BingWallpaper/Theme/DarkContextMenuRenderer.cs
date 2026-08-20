@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -67,14 +68,18 @@ internal sealed class DarkContextMenuRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
     {
-        using SolidBrush brush = new(_palette.ControlBackground);
-        e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.ToolStrip.Size));
+        using (SolidBrush brush = new SolidBrush(_palette.ControlBackground))
+        {
+            e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.ToolStrip.Size));
+        }
     }
 
     protected override void OnRenderImageMargin(ToolStripRenderEventArgs e)
     {
-        using SolidBrush brush = new(_palette.ControlBackground);
-        e.Graphics.FillRectangle(brush, e.AffectedBounds);
+        using (SolidBrush brush = new SolidBrush(_palette.ControlBackground))
+        {
+            e.Graphics.FillRectangle(brush, e.AffectedBounds);
+        }
     }
 
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
@@ -91,11 +96,15 @@ internal sealed class DarkContextMenuRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
     {
-        using SolidBrush background = new(_palette.ControlBackground);
-        e.Graphics.FillRectangle(background, new Rectangle(Point.Empty, e.Item.Size));
+        using (SolidBrush background = new SolidBrush(_palette.ControlBackground))
+        {
+            e.Graphics.FillRectangle(background, new Rectangle(Point.Empty, e.Item.Size));
+        }
 
-        using Pen pen = new(_palette.Border);
-        int y = e.Item.Height / 2;
-        e.Graphics.DrawLine(pen, 4, y, Math.Max(4, e.Item.Width - 4), y);
+        using (Pen pen = new Pen(_palette.Border))
+        {
+            int y = e.Item.Height / 2;
+            e.Graphics.DrawLine(pen, 4, y, Math.Max(4, e.Item.Width - 4), y);
+        }
     }
 }

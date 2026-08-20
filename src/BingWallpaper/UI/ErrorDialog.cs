@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using BingWallpaper.Theme;
@@ -11,24 +12,27 @@ namespace BingWallpaper.UI;
 internal static class ErrorDialog
 {
     private static string NormalizeLineEndings(string text)
-        => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal);
+        => text.Replace("\r\n", "\n").Replace("\n", "\r\n");
 
     public static void Show(string title, string details)
     {
         try
         {
-            using Form form = new()
+            using Form form = new Form()
             {
                 Text = title,
                 StartPosition = FormStartPosition.CenterScreen,
                 Size = new Size(760, 480),
                 MinimumSize = new Size(480, 320),
                 ShowInTaskbar = true,
+                AutoScaleDimensions = new SizeF(96F, 96F),
                 AutoScaleMode = AutoScaleMode.Dpi,
                 TopMost = true,
             };
 
-            TextBox text = new()
+            ThemeManager.ApplySystemFont(form);
+
+            TextBox text = new TextBox()
             {
                 Multiline = true,
                 ReadOnly = true,
@@ -39,21 +43,21 @@ internal static class ErrorDialog
                 Font = new Font(FontFamily.GenericMonospace, 9f),
             };
 
-            Panel buttons = new()
+            Panel buttons = new Panel()
             {
                 Dock = DockStyle.Bottom,
                 Height = 48,
                 Padding = new Padding(8),
             };
 
-            Button copy = new()
+            Button copy = new Button()
             {
                 Text = "复制到剪贴板",
                 Width = 140,
                 Height = 30,
                 Anchor = AnchorStyles.Top | AnchorStyles.Right,
             };
-            Button close = new()
+            Button close = new Button()
             {
                 Text = "关闭",
                 Width = 100,

@@ -1,5 +1,10 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace BingWallpaper;
 
@@ -29,11 +34,11 @@ internal static class SelfTest
         {
             if (arg.StartsWith("--market=", StringComparison.OrdinalIgnoreCase))
             {
-                market = AppConfig.NormalizeMarket(arg["--market=".Length..]);
+                market = AppConfig.NormalizeMarket(arg.Substring("--market=".Length));
             }
             else if (arg.StartsWith("--resolution=", StringComparison.OrdinalIgnoreCase))
             {
-                string value = arg["--resolution=".Length..].Trim().ToLowerInvariant();
+                string value = arg.Substring("--resolution=".Length).Trim().ToLowerInvariant();
                 resolution = value is "1080p" or "1920x1080" or "fullhd"
                     ? ResolutionKind.FullHd
                     : ResolutionKind.Uhd;
@@ -50,44 +55,48 @@ internal static class SelfTest
 
         try
         {
-            using BingClient client = new();
-            using CancellationTokenSource cts = new(TimeSpan.FromMinutes(3));
-
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            List<BingImageInfo> images = await client
-                .FetchAsync(market, 0, BingClient.MaxImageCount, cts.Token)
-                .ConfigureAwait(false);
-
-            BingImageInfo today = images[0];
-            string imageUrl = today.GetImageUrl(resolution);
-            Logger.Info("[ OK ] metadata: " + images.Count + " entries, newest startdate=" + today.StartDate);
-            Logger.Info("[ OK ] title: " + today.DisplayTitle);
-            Logger.Info("[ OK ] copyright: " + today.Copyright);
-            Logger.Info("[ OK ] image url: " + imageUrl);
-            Logger.Info("[ OK ] cache file name would be: " + today.GetFileName(market, resolution));
-
-            long bytes = await client.DownloadImageAsync(imageUrl, tempFile, cts.Token).ConfigureAwait(false);
-
-            if (!BingClient.TryValidateImage(tempFile, out int width, out int height, out string? error))
+            using (BingClient client = new BingClient())
+            using (CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromMinutes(3)))
             {
-                Logger.Error("[FAIL] downloaded file did not decode: " + error);
-                return 1;
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                List<BingImageInfo> images = await client
+                    .FetchAsync(market, 0, BingClient.MaxImageCount, cts.Token)
+                    .ConfigureAwait(false);
+
+                BingImageInfo today = images[0];
+                string imageUrl = today.GetImageUrl(resolution);
+                Logger.Info("[ OK ] metadata: " + images.Count + " entries, newest startdate=" + today.StartDate);
+                Logger.Info("[ OK ] title: " + today.DisplayTitle);
+                Logger.Info("[ OK ] copyright: " + today.Copyright);
+                Logger.Info("[ OK ] image url: " + imageUrl);
+                Logger.Info("[ OK ] cache file name would be: " + today.GetFileName(market, resolution));
+
+                long bytes = await client.DownloadImageAsync(imageUrl, tempFile, cts.Token).ConfigureAwait(false);
+
+                int width;
+                int height;
+                string? error;
+                if (!BingClient.TryValidateImage(tempFile, out width, out height, out error))
+                {
+                    Logger.Error("[FAIL] downloaded file did not decode: " + error);
+                    return 1;
+                }
+
+                stopwatch.Stop();
+                Logger.Info(
+                    "[ OK ] downloaded " + bytes.ToString(CultureInfo.InvariantCulture) + " bytes, decoded " +
+                    width + "x" + height);
+
+                if (resolution == ResolutionKind.Uhd && width < 3000)
+                {
+                    Logger.Warn(
+                        "UHD was requested but the decoded image is only " + width + "px wide. " +
+                        "Bing may not offer a 4K variant for this market/day.");
+                }
+
+                Logger.Info("=== self test PASSED in " + stopwatch.ElapsedMilliseconds + " ms ===");
+                return 0;
             }
-
-            stopwatch.Stop();
-            Logger.Info(
-                "[ OK ] downloaded " + bytes.ToString(CultureInfo.InvariantCulture) + " bytes, decoded " +
-                width + "x" + height);
-
-            if (resolution == ResolutionKind.Uhd && width < 3000)
-            {
-                Logger.Warn(
-                    "UHD was requested but the decoded image is only " + width + "px wide. " +
-                    "Bing may not offer a 4K variant for this market/day.");
-            }
-
-            Logger.Info("=== self test PASSED in " + stopwatch.ElapsedMilliseconds + " ms ===");
-            return 0;
         }
         catch (Exception ex)
         {

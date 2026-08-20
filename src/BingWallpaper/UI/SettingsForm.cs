@@ -1,3 +1,4 @@
+using System;
 using System.Drawing;
 using System.Windows.Forms;
 using BingWallpaper.Theme;
@@ -61,14 +62,18 @@ internal sealed class SettingsForm : Form
     {
         _config = config;
 
+        ThemeManager.ApplySystemFont(this);
+
         Text = "BingWallpaper 设置";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = true;
         StartPosition = FormStartPosition.CenterScreen;
-        AutoScaleDimensions = new SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
+        // DPI based scaling, not font based: the .NET Framework default font and the
+        // system UI font have different metrics, which makes font scaling unreliable.
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Padding = new Padding(18, 16, 18, 14);
 
         BuildLayout();
@@ -99,7 +104,7 @@ internal sealed class SettingsForm : Form
     private void FitToContent()
     {
         Size preferred = _root.PreferredSize;
-        int width = Math.Max(preferred.Width, LogicalToDeviceUnits(430)) + Padding.Horizontal;
+        int width = Math.Max(preferred.Width, DpiScale.Round(430)) + Padding.Horizontal;
         int height = preferred.Height + Padding.Vertical;
         ClientSize = new Size(width, height);
     }
@@ -139,7 +144,7 @@ internal sealed class SettingsForm : Form
 
         _fitBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _fitBox.Width = 150;
-        foreach (WallpaperFit fit in Enum.GetValues<WallpaperFit>())
+        foreach (WallpaperFit fit in (WallpaperFit[])Enum.GetValues(typeof(WallpaperFit)))
         {
             _fitBox.Items.Add(WallpaperService.GetFitDisplayName(fit));
         }
@@ -271,11 +276,11 @@ internal sealed class SettingsForm : Form
             _themeSystem.Checked = _config.Theme == ThemeMode.System;
             _themeLight.Checked = _config.Theme == ThemeMode.Light;
             _themeDark.Checked = _config.Theme == ThemeMode.Dark;
-            _intervalBox.Value = Math.Clamp(
+            _intervalBox.Value = AppConfig.Clamp(
                 _config.RefreshIntervalHours,
                 AppConfig.MinRefreshIntervalHours,
                 AppConfig.MaxRefreshIntervalHours);
-            _keepDaysBox.Value = Math.Clamp(_config.KeepDays, 0, AppConfig.MaxKeepDays);
+            _keepDaysBox.Value = AppConfig.Clamp(_config.KeepDays, 0, AppConfig.MaxKeepDays);
             _startupBox.Checked = _config.RunAtStartup;
         }
         finally

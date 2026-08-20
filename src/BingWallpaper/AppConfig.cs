@@ -1,4 +1,7 @@
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
 
 namespace BingWallpaper;
@@ -62,7 +65,7 @@ internal sealed class AppConfig
     /// </summary>
     public static AppConfig Load(string path)
     {
-        AppConfig config = new();
+        AppConfig config = new AppConfig();
         Dictionary<string, string> values = ReadIni(path);
         if (values.Count == 0)
         {
@@ -84,7 +87,7 @@ internal sealed class AppConfig
 
     public void Save(string path)
     {
-        StringBuilder sb = new();
+        StringBuilder sb = new StringBuilder();
         sb.AppendLine("; BingWallpaper configuration - plain text, safe to edit by hand.");
         sb.AppendLine("[" + SectionName + "]");
         sb.AppendLine("Market=" + Market);
@@ -97,7 +100,7 @@ internal sealed class AppConfig
 
         string tmp = path + ".tmp";
         File.WriteAllText(tmp, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        File.Move(tmp, path, overwrite: true);
+        Paths.MoveOverwrite(tmp, path);
     }
 
     public static string ResolutionToString(ResolutionKind kind) => kind == ResolutionKind.Uhd ? "UHD" : "1920x1080";
@@ -117,14 +120,14 @@ internal sealed class AppConfig
             return trimmed;
         }
 
-        string language = trimmed[..dash].ToLowerInvariant();
-        string region = trimmed[(dash + 1)..].ToUpperInvariant();
+        string language = trimmed.Substring(0, dash).ToLowerInvariant();
+        string region = trimmed.Substring(dash + 1).ToUpperInvariant();
         return language + "-" + region;
     }
 
     private static Dictionary<string, string> ReadIni(string path)
     {
-        Dictionary<string, string> values = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             if (!File.Exists(path))
@@ -144,7 +147,7 @@ internal sealed class AppConfig
                 if (line[0] == '[')
                 {
                     int end = line.IndexOf(']');
-                    string section = end > 1 ? line[1..end] : string.Empty;
+                    string section = end > 1 ? line.Substring(1, end - 1) : string.Empty;
                     inSection = string.Equals(section, SectionName, StringComparison.OrdinalIgnoreCase);
                     continue;
                 }
@@ -160,8 +163,8 @@ internal sealed class AppConfig
                     continue;
                 }
 
-                string key = line[..sep].Trim();
-                string value = line[(sep + 1)..].Trim();
+                string key = line.Substring(0, sep).Trim();
+                string value = line.Substring(sep + 1).Trim();
                 values[key] = value;
             }
         }
@@ -212,5 +215,6 @@ internal sealed class AppConfig
         where TEnum : struct, Enum
         => Enum.TryParse(value.Trim(), ignoreCase: true, out TEnum parsed) ? parsed : fallback;
 
-    private static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
+    /// <summary>Math.Clamp does not exist on .NET Framework.</summary>
+    public static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
 }
