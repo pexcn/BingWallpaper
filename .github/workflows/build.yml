@@ -51,6 +51,15 @@ jobs:
       - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
+      # The native PDB the AOT compiler emits is four times the size of the program
+      # itself and of no use to anyone running it, so it is kept as its own artifact
+      # rather than shipped.
+      - name: Separate the debug symbols
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path symbols | Out-Null
+          Get-ChildItem publish -Recurse -File -Filter *.pdb | Move-Item -Destination symbols
+
       - name: Report published size
         shell: pwsh
         run: |
@@ -77,6 +86,13 @@ jobs:
           path: ${{ steps.package.outputs.zip }}
           if-no-files-found: error
 
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: BingWallpaper-win-x64-symbols
+          path: symbols
+          if-no-files-found: error
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
@@ -86,8 +102,8 @@ jobs:
           body: |
             BingWallpaper ${{ steps.version.outputs.value }}
 
-            WinUI 3（Windows App SDK）版本，**无需安装任何运行时**：.NET 与 Windows App SDK
-            都已随程序打包（self-contained + WindowsAppSDKSelfContained）。
+            WinUI 3（Windows App SDK）+ Native AOT 版本，**无需安装任何运行时**：
+            .NET 已编译进 `BingWallpaper.exe`，Windows App SDK 随包附带。
 
             解压到一个有写入权限的目录后运行 `BingWallpaper.exe` 即可，配置、日志与壁纸都保存在
             程序所在目录。压缩包里的文件请保持在一起，不要只把 exe 单独拷走。

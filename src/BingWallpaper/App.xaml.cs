@@ -115,7 +115,7 @@ public partial class App : Application
     /// <summary>One line of environment information, written on every start.</summary>
     private static void LogEnvironment()
     {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+        string version = ReadVersion();
         bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
         Logger.Info(
             "BingWallpaper " + version +
@@ -126,6 +126,24 @@ public partial class App : Application
             " | system theme " + (ThemeManager.IsSystemDark() ? "Dark" : "Light") +
             " | dir " + Paths.BaseDirectory +
             " | writable " + writable + (writable ? string.Empty : " (" + writeError + ")"));
+    }
+
+    /// <summary>
+    /// The assembly version, for the log line. Wrapped because reflection over the
+    /// assembly identity is one of the things an AOT compiled program is allowed to
+    /// answer differently - and a version number is never worth a failed start.
+    /// </summary>
+    private static string ReadVersion()
+    {
+        try
+        {
+            return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("Could not read the assembly version: " + ex.Message);
+            return "unknown";
+        }
     }
 
     /// <summary>Tears everything down and ends the message loop.</summary>
