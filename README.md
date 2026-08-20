@@ -11,7 +11,7 @@
 
 - 常驻托盘，无主窗口，默认每小时检查一次今日壁纸
 - 4K（`_UHD.jpg`）/ 1080p（`_1920x1080.jpg`）分辨率由客户端自己决定，不受接口返回值影响
-- 支持 14 个常见市场，且下拉框可手填任意市场代码
+- 支持 14 个常见市场（设置界面为只读下拉框；INI 里可手填任意市场代码，程序会把它补进列表）
 - 最近 8 天历史壁纸缩略图网格，一键切换；托盘菜单可直接上一张 / 下一张
 - 六种填充方式：填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨区
 - 手写深色模式，**在 Windows 10 上同样有效**（不依赖仅 Windows 11 可用的 `Application.SetColorMode`），可跟随系统实时切换
@@ -145,7 +145,8 @@ BingWallpaper.exe --help
 | `%APPDATA%\Microsoft\Windows\Themes\TranscodedWallpaper` | Windows 转码后的壁纸副本 | 可手动删除，系统会在下次换壁纸时重建 |
 | `%APPDATA%\Microsoft\Windows\Themes\CachedFiles\` | 壁纸缓存 | 同上 |
 
-设置界面里的**「清除所有系统痕迹」**按钮会：删除 Run 键下的 `BingWallpaper` 值、把 `RunAtStartup` 置为 `false`，并弹窗列出上述由 Windows 自行写入、本程序无法安全移除的位置，供你手动清理。
+要彻底清理：在设置界面**取消勾选「开机自动启动」**（这会删除 Run 键下的 `BingWallpaper` 值），然后删除整个程序目录。
+上面列出的由 Windows 自行写入的位置，本程序无法安全移除，需按表中说明手动处理。
 
 ---
 

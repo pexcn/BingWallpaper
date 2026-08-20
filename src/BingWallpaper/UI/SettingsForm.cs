@@ -49,10 +49,9 @@ internal sealed class SettingsForm : Form
     private readonly ThemedRadioButton _themeSystem = new("跟随系统");
     private readonly ThemedRadioButton _themeLight = new("亮色");
     private readonly ThemedRadioButton _themeDark = new("暗色");
-    private readonly NumericUpDown _intervalBox = new();
-    private readonly NumericUpDown _keepDaysBox = new();
+    private readonly ComboBox _intervalBox = new();
+    private readonly ComboBox _keepDaysBox = new();
     private readonly ThemedCheckBox _startupBox = new("开机自动启动");
-    private readonly Button _cleanTracesButton = new();
     private readonly Button _closeButton = new();
 
     private TableLayoutPanel _root = null!;
@@ -135,7 +134,10 @@ internal sealed class SettingsForm : Form
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         fields.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        _marketBox.DropDownStyle = ComboBoxStyle.DropDown;
+        // Read only: a free text market code is a typo waiting to happen. A code that
+        // is not in this list can still be set by editing the INI file, and
+        // LoadFromConfig adds it to the list so it stays visible and selectable.
+        _marketBox.DropDownStyle = ComboBoxStyle.DropDownList;
         _marketBox.Width = 190;
         _marketBox.Items.AddRange(Markets);
         AddRow(fields, "壁纸地区", _marketBox);
@@ -153,23 +155,28 @@ internal sealed class SettingsForm : Form
 
         AddRow(fields, "界面主题", CreateGroup(_themeSystem, _themeLight, _themeDark));
 
-        _intervalBox.Width = 80;
-        _intervalBox.Minimum = AppConfig.MinRefreshIntervalHours;
-        _intervalBox.Maximum = AppConfig.MaxRefreshIntervalHours;
-        AddRow(fields, "检查间隔", CreateGroup(_intervalBox, CreateHint("小时")));
+        // Drop downs instead of NumericUpDown: the spinner buttons of a NumericUpDown
+        // are painted by the Windows visual styles and stay light in the dark theme,
+        // and carrying the unit in the item text removes the separate hint label.
+        _intervalBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _intervalBox.Width = 150;
+        foreach (int hours in new[] { 1, 2, 3, 4, 6, 8, 12, 24 })
+        {
+            _intervalBox.Items.Add(new Choice(hours, FormatHours(hours)));
+        }
 
-        _keepDaysBox.Width = 80;
-        _keepDaysBox.Minimum = 0;
-        _keepDaysBox.Maximum = AppConfig.MaxKeepDays;
-        AddRow(fields, "壁纸保留天数", CreateGroup(_keepDaysBox, CreateHint("天，0 = 永久保留")));
+        AddRow(fields, "检查间隔", _intervalBox);
+
+        _keepDaysBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _keepDaysBox.Width = 150;
+        foreach (int days in new[] { 0, 7, 14, 30, 60, 90, 180, 365 })
+        {
+            _keepDaysBox.Items.Add(new Choice(days, FormatDays(days)));
+        }
+
+        AddRow(fields, "壁纸保留天数", _keepDaysBox);
 
         AddRow(fields, string.Empty, CreateGroup(_startupBox));
-
-        _cleanTracesButton.Text = "清除所有系统痕迹";
-        _cleanTracesButton.AutoSize = true;
-        _cleanTracesButton.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        _cleanTracesButton.Padding = new Padding(10, 5, 10, 5);
-        _cleanTracesButton.Margin = new Padding(0, 0, 8, 0);
 
         _closeButton.Text = "关闭";
         _closeButton.AutoSize = true;
@@ -188,7 +195,6 @@ internal sealed class SettingsForm : Form
             Padding = Padding.Empty,
         };
         buttons.Controls.Add(_closeButton);
-        buttons.Controls.Add(_cleanTracesButton);
 
         _root = new TableLayoutPanel
         {
@@ -256,31 +262,86 @@ internal sealed class SettingsForm : Form
         return panel;
     }
 
-    private static Label CreateHint(string text) => new()
+    /// <summary>One entry of a numeric drop down: the stored value plus its label.</summary>
+    private sealed class Choice
     {
-        Text = text,
-        AutoSize = true,
-        TextAlign = ContentAlignment.MiddleLeft,
-        Padding = new Padding(0, 4, 0, 0),
-    };
+        public Choice(int value, string text)
+        {
+            Value = value;
+            Text = text;
+        }
+
+        public int Value { get; }
+
+        public string Text { get; }
+
+        public override string ToString() => Text;
+    }
+
+    private static string FormatHours(int hours) => hours + " 小时";
+
+    private static string FormatDays(int days) => days == 0 ? "永久保留" : days + " 天";
+
+    /// <summary>
+    /// Selects the entry carrying <paramref name="value"/>. A value that no preset
+    /// covers comes from a hand edited INI file, so it is inserted rather than
+    /// silently replaced by the closest preset.
+    /// </summary>
+    private static void SelectValue(ComboBox box, int value, Func<int, string> format)
+    {
+        for (int i = 0; i < box.Items.Count; i++)
+        {
+            if (box.Items[i] is Choice choice && choice.Value == value)
+            {
+                box.SelectedIndex = i;
+                return;
+            }
+        }
+
+        int index = 0;
+        while (index < box.Items.Count
+               && box.Items[index] is Choice existing
+               && existing.Value < value)
+        {
+            index++;
+        }
+
+        box.Items.Insert(index, new Choice(value, format(value)));
+        box.SelectedIndex = index;
+    }
+
+    private static int GetValue(ComboBox box, int fallback)
+        => box.SelectedItem is Choice choice ? choice.Value : fallback;
 
     private void LoadFromConfig()
     {
         _loading = true;
         try
         {
-            _marketBox.Text = _config.Market;
+            if (!_marketBox.Items.Contains(_config.Market))
+            {
+                // Market code set by hand in the INI file - keep it selectable.
+                _marketBox.Items.Add(_config.Market);
+            }
+
+            _marketBox.SelectedItem = _config.Market;
             _resolution4K.Checked = _config.Resolution == ResolutionKind.Uhd;
             _resolution1080.Checked = _config.Resolution == ResolutionKind.FullHd;
             _fitBox.SelectedIndex = (int)_config.Fit;
             _themeSystem.Checked = _config.Theme == ThemeMode.System;
             _themeLight.Checked = _config.Theme == ThemeMode.Light;
             _themeDark.Checked = _config.Theme == ThemeMode.Dark;
-            _intervalBox.Value = AppConfig.Clamp(
-                _config.RefreshIntervalHours,
-                AppConfig.MinRefreshIntervalHours,
-                AppConfig.MaxRefreshIntervalHours);
-            _keepDaysBox.Value = AppConfig.Clamp(_config.KeepDays, 0, AppConfig.MaxKeepDays);
+            SelectValue(
+                _intervalBox,
+                AppConfig.Clamp(
+                    _config.RefreshIntervalHours,
+                    AppConfig.MinRefreshIntervalHours,
+                    AppConfig.MaxRefreshIntervalHours),
+                FormatHours);
+            SelectValue(
+                _keepDaysBox,
+                AppConfig.Clamp(_config.KeepDays, 0, AppConfig.MaxKeepDays),
+                FormatDays);
             _startupBox.Checked = _config.RunAtStartup;
         }
         finally
@@ -292,7 +353,6 @@ internal sealed class SettingsForm : Form
     private void WireEvents()
     {
         _marketBox.SelectedIndexChanged += (_, _) => CommitMarket();
-        _marketBox.Leave += (_, _) => CommitMarket();
 
         _resolution4K.CheckedChanged += (_, _) => CommitResolution(_resolution4K, ResolutionKind.Uhd);
         _resolution1080.CheckedChanged += (_, _) => CommitResolution(_resolution1080, ResolutionKind.FullHd);
@@ -312,25 +372,27 @@ internal sealed class SettingsForm : Form
         _themeLight.CheckedChanged += (_, _) => CommitTheme(_themeLight, ThemeMode.Light);
         _themeDark.CheckedChanged += (_, _) => CommitTheme(_themeDark, ThemeMode.Dark);
 
-        _intervalBox.ValueChanged += (_, _) =>
+        _intervalBox.SelectedIndexChanged += (_, _) =>
         {
-            if (_loading || _config.RefreshIntervalHours == (int)_intervalBox.Value)
+            int hours = GetValue(_intervalBox, _config.RefreshIntervalHours);
+            if (_loading || _config.RefreshIntervalHours == hours)
             {
                 return;
             }
 
-            _config.RefreshIntervalHours = (int)_intervalBox.Value;
+            _config.RefreshIntervalHours = hours;
             Persist(SettingKind.Interval);
         };
 
-        _keepDaysBox.ValueChanged += (_, _) =>
+        _keepDaysBox.SelectedIndexChanged += (_, _) =>
         {
-            if (_loading || _config.KeepDays == (int)_keepDaysBox.Value)
+            int days = GetValue(_keepDaysBox, _config.KeepDays);
+            if (_loading || _config.KeepDays == days)
             {
                 return;
             }
 
-            _config.KeepDays = (int)_keepDaysBox.Value;
+            _config.KeepDays = days;
             Persist(SettingKind.KeepDays);
         };
 
@@ -345,7 +407,6 @@ internal sealed class SettingsForm : Form
             Persist(SettingKind.RunAtStartup);
         };
 
-        _cleanTracesButton.Click += (_, _) => CleanSystemTraces();
         _closeButton.Click += (_, _) => Hide();
     }
 
@@ -373,23 +434,8 @@ internal sealed class SettingsForm : Form
 
     private void CommitMarket()
     {
-        if (_loading)
+        if (_loading || !(_marketBox.SelectedItem is string market))
         {
-            return;
-        }
-
-        string market = AppConfig.NormalizeMarket(_marketBox.Text);
-        if (string.IsNullOrWhiteSpace(market) || market.Length < 2)
-        {
-            MessageBox.Show(
-                this,
-                "市场代码格式类似 zh-CN 或 en-US，请重新输入。",
-                "BingWallpaper",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-            _loading = true;
-            _marketBox.Text = _config.Market;
-            _loading = false;
             return;
         }
 
@@ -399,9 +445,6 @@ internal sealed class SettingsForm : Form
         }
 
         _config.Market = market;
-        _loading = true;
-        _marketBox.Text = market;
-        _loading = false;
         Persist(SettingKind.Market);
     }
 
@@ -419,46 +462,5 @@ internal sealed class SettingsForm : Form
         }
 
         SettingsChanged?.Invoke(this, new SettingsChangedEventArgs(kind));
-    }
-
-    /// <summary>
-    /// Removes the only registry value this program writes on its own behalf and
-    /// explains what Windows itself wrote when the wallpaper was applied.
-    /// </summary>
-    private void CleanSystemTraces()
-    {
-        AutoStartManager.Disable();
-
-        _loading = true;
-        _startupBox.Checked = false;
-        _loading = false;
-
-        _config.RunAtStartup = false;
-        try
-        {
-            _config.Save(Paths.ConfigFile);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error("Could not save the configuration after clearing traces.", ex);
-        }
-
-        Logger.Info("System traces cleared (Run value removed, RunAtStartup=false).");
-
-        MessageBox.Show(
-            this,
-            "已完成：\r\n" +
-            "  • 删除注册表 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run 下的 BingWallpaper 值\r\n" +
-            "  • 配置项 RunAtStartup 已置为 false\r\n\r\n" +
-            "以下位置由 Windows 自身在设置壁纸时写入，本程序无法安全移除，如需清理请手动处理：\r\n" +
-            "  • HKCU\\Control Panel\\Desktop 的 Wallpaper / WallpaperStyle / TileWallpaper\r\n" +
-            "    （通过系统「个性化 → 背景」重新选择壁纸即可覆盖）\r\n" +
-            "  • HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Wallpapers 的 BackgroundHistoryPath*\r\n" +
-            "  • %APPDATA%\\Microsoft\\Windows\\Themes\\TranscodedWallpaper 及同目录下的 CachedFiles\r\n\r\n" +
-            "本程序自身的文件（BingWallpaper.ini、BingWallpaper.log、wallpapers 文件夹）全部位于程序目录，" +
-            "删除整个文件夹即可彻底卸载。",
-            "BingWallpaper - 清除系统痕迹",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
     }
 }
