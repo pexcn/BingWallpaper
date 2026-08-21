@@ -29,7 +29,7 @@
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper-<版本>-win-x64.zip`（约 27 MB，解压后约 64 MB）
+1. 从 [Releases](../../releases) 下载 `BingWallpaper-<版本>-win-x64.zip`（约 27 MB，解压后约 66 MB）
 2. 解压到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
    - 压缩包里的文件要保持在一起：`BingWallpaper.exe` 需要同目录下的运行时文件，单独拷走 exe 无法启动
@@ -41,7 +41,7 @@
 
 | 方案 | 体积 | 是否需要安装运行时 |
 |---|---|---|
-| WinUI 3 + Native AOT + 自包含（本项目） | exe 9.6 MB，整包约 64 MB（压缩包 27 MB） | **否**，.NET 在 exe 内，Windows App SDK 在包内 |
+| WinUI 3 + Native AOT + 自包含（本项目） | exe 9.6 MB，整包 66.5 MB（压缩包 27 MB） | **否**，.NET 在 exe 内，Windows App SDK 在包内 |
 | WinUI 3 + 自包含，不用 AOT | 166 MB | 否，同上 |
 | WinUI 3 + 依赖框架 | 数 MB | 是，需装 .NET Desktop Runtime **和** Windows App SDK 运行时 |
 | WinForms + .NET Framework 4.8（旧实现） | ~200 KB 单文件 | 否，Windows 10 1903+ 内置 |
@@ -50,13 +50,13 @@ Windows 里**没有任何一个版本内置现代 .NET 或 Windows App SDK**，�
 「体积」和「免安装」之间二选一。本项目选择免安装：便携性（拷贝即用、删除文件夹即卸载）
 是这个项目存在的理由之一，让用户先去装两个运行时不能接受。
 
-两处把 166 MB 压到 64 MB 的取舍：
+两处把 166 MB 压到 66 MB 的取舍：
 
 - 引用 `Microsoft.WindowsAppSDK.WinUI` 组件包而不是 `Microsoft.WindowsAppSDK` 元包。后者代表
   「整个 SDK」，会把 AI、ML、Search、Widgets 一并塞进发布目录——光 `onnxruntime.dll` 和
   `DirectML.dll` 就是 40 MB。（元包：222 MB → 组件包：166 MB）
 - Native AOT。CoreCLR、JIT 和一整排托管程序集（仅 `Microsoft.Windows.SDK.NET.dll` 就 24 MB）
-  被换成一个 9.6 MB 的原生 exe。（166 MB → 64 MB）
+  被换成一个 9.6 MB 的原生 exe。（166 MB → 66 MB）
 
 剩下的 55 MB 基本都是 Windows App SDK 自己的原生运行时（`Microsoft.ui.xaml.dll` 15 MB、
 `Microsoft.UI.Xaml.Controls.dll` 7 MB 等），那是 WinUI 的地板价。
@@ -87,6 +87,8 @@ Windows 里**没有任何一个版本内置现代 .NET 或 Windows App SDK**，�
 ├─ BingWallpaper.exe
 ├─ BingWallpaper.ini        # 配置，纯文本可手改
 ├─ BingWallpaper.log        # 日志（512KB 轮转，保留一个 BingWallpaper.log.1）
+├─ resources.pri            # 编译后的 XAML 资源索引（缺了它任何窗口都打不开，勿删）
+├─ App.xbf                  # 编译后的 XAML，UI\ 下还有三个
 ├─ Microsoft.ui.xaml.dll    # Windows App SDK 运行时文件（随包附带，勿删）
 ├─ ...                      # 同上，其余运行时文件
 └─ wallpapers\
@@ -221,6 +223,12 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   Win32 资源（资源管理器、任务栏、Alt+Tab），也由 `LoadImage` 按当前 DPI 取出对应帧给托盘和窗口标题栏使用
 - 16/20/24 三帧是从 128 帧重采样生成的，不是逐级均值缩小：均值缩小出来的小帧笔画落在半像素上，
   标题栏和托盘里看着发虚
+- 窗口的 XAML 是编译产物：每个 `.xaml` 编译成 `.xbf`，索引在 `resources.pri` 里，运行时由
+  `LoadComponent(ms-appx:///...)` 取出。这两样东西**必须随程序一起发布**——`.csproj` 里的
+  `PublishXamlResources` 目标负责把它们加进发布列表，`ProjectPriFileName` 负责让索引叫
+  `resources.pri`（`Microsoft.ui.xaml.dll` 写死找这个名字，而 MRT Core 默认按 exe 名命名）。
+  少了任何一样，程序能编译、能启动、托盘也正常，只在第一次打开窗口时抛 `XamlParseException`，
+  所以 CI 会检查发布目录里这些文件在不在
 - 没有主窗口：`DispatcherShutdownMode = OnExplicitShutdown`，否则关掉设置窗口就等于退出程序
 - 按 PerMonitorV2 感知（见 `app.manifest`），WinUI 自己处理跨显示器缩放，不再需要手写 DPI 换算
 - 图片身份使用接口返回的 `startdate` 而非本地日期（zh-CN 市场在 UTC 16:00 换图）
