@@ -44,6 +44,15 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
+    <!--
+      The name the WinUI runtime looks for. Microsoft.ui.xaml.dll resolves every
+      ms-appx:/// URI - which is how a window loads its own compiled markup -
+      through a resource index called exactly "resources.pri", but the MRT Core
+      tooling names an unpackaged executable's index after the executable. Without
+      this the program builds, starts, and throws XamlParseException the first time
+      a window is opened.
+    -->
+    <ProjectPriFileName>resources.pri</ProjectPriFileName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
     <DebugType>embedded</DebugType>
@@ -77,6 +86,29 @@
     -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
   </ItemGroup>
+
+  <!--
+    Publishes the compiled markup. The build output has resources.pri and one .xbf
+    per XAML file next to the executable, but the publish pipeline knows about
+    neither: they are produced by the WinUI tooling as build outputs, and nothing
+    adds them to the list of files to publish. The result is a publish folder that
+    is missing exactly the files every window needs.
+    If a future SDK starts publishing them on its own, this target will collide
+    with it (NETSDK1152, two publish files with the same relative path) - which is
+    the signal to delete it.
+  -->
+  <Target Name="PublishXamlResources" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <_XamlCompiledMarkup Include="$(TargetDir)**\*.xbf" />
+
+      <ResolvedFileToPublish Include="$(TargetDir)$(ProjectPriFileName)"
+                             RelativePath="$(ProjectPriFileName)"
+                             CopyToPublishDirectory="PreserveNewest" />
+      <ResolvedFileToPublish Include="@(_XamlCompiledMarkup)"
+                             RelativePath="%(RecursiveDir)%(Filename)%(Extension)"
+                             CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <!--

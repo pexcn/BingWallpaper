@@ -51,37 +51,29 @@ jobs:
       - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
-      # Temporary: the XAML resources never reach the publish folder. This step
-      # collects the evidence needed to pick the fix - what the resource index
-      # holds, and what the MSIX tooling switch would produce instead.
-      - name: Diagnose XAML resources
+      # A WinUI window loads its own compiled markup out of resources.pri at run
+      # time, so a publish folder that is missing it builds, starts, and then
+      # throws XamlParseException the moment a window is opened - which no compiler
+      # can catch. The project file publishes those files explicitly; this makes
+      # sure it still does.
+      - name: Verify the XAML resources were published
         shell: pwsh
         run: |
-          $bin = "src/BingWallpaper/bin/Release/net10.0-windows10.0.19041.0/win-x64"
+          $required = 'resources.pri', 'App.xbf', 'UI/SettingsWindow.xbf', 'UI/HistoryWindow.xbf', 'UI/ErrorWindow.xbf'
+          $missing = $required | Where-Object { -not (Test-Path (Join-Path publish $_)) }
+          if ($missing) { throw "Missing from the publish output: $($missing -join ', ')" }
+          "Present: $($required -join ', ')"
 
-          "### .pri / .xbf in the publish output"
-          Get-ChildItem publish -Recurse -File |
-            Where-Object { $_.Extension -in '.pri', '.xbf' } |
-            ForEach-Object { "{0,-60} {1,9:N0}" -f $_.Name, $_.Length }
-
-          "### what is inside the app's own PRI"
-          $makepri = Get-ChildItem "$env:USERPROFILE\.nuget\packages" -Recurse -Filter makepri.exe -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if (-not $makepri) {
-            "makepri.exe not found"
+          # Belt and braces: the index has to actually carry the markup, not just exist.
+          $makepri = Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.windows.sdk.buildtools" -Recurse -Filter makepri.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          if ($makepri) {
+            & $makepri.FullName dump /if publish/resources.pri /of pri-dump.xml /o | Out-Null
+            $entries = Select-String -Path pri-dump.xml -Pattern 'SettingsWindow|HistoryWindow|ErrorWindow|App\.xbf'
+            $entries | ForEach-Object { $_.Line.Trim() } | Select-Object -First 12
+            if (-not $entries) { throw "resources.pri does not index the compiled markup." }
           } else {
-            & $makepri.FullName dump /if "$bin/BingWallpaper.pri" /of pri-dump.xml /o | Out-Null
-            Get-Content pri-dump.xml | Select-String -Pattern "ResourceMapSubtree|<NamedResource|ResourceMap name|xbf" |
-              ForEach-Object { $_.Line.Trim() } | Select-Object -First 40
-          }
-
-          "### what EnableMsixTooling=true would publish"
-          dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish-msix -p:EnableMsixTooling=true 2>&1 |
-            Select-Object -Last 5
-          if (Test-Path publish-msix) {
-            Get-ChildItem publish-msix -Recurse -File |
-              Where-Object { $_.Extension -in '.pri', '.xbf' } |
-              ForEach-Object { "{0,-60} {1,9:N0}" -f $_.FullName.Replace("$pwd\publish-msix\", ''), $_.Length }
+            "makepri.exe (x64) not found, skipped the index dump."
           }
 
       # The native PDB the AOT compiler emits is four times the size of the program
