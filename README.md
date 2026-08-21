@@ -27,7 +27,7 @@
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，Native AOT 产物，十余 MB；准确大小见 Release 页面）
+1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，Native AOT 产物，约 20 MB）
 2. 放到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
 3. 双击运行，托盘出现图标后即开始工作
@@ -38,7 +38,7 @@
 
 | 方案 | 体积 | 是否需要安装运行时 |
 |---|---|---|
-| .NET 10 + Native AOT（本项目） | 十余 MB | **否**，已编译成原生代码 |
+| .NET 10 + Native AOT（本项目） | ~20 MB | **否**，已编译成原生代码 |
 | .NET Framework 4.8 | ~200 KB | **否**，Windows 10 1903+ 内置 |
 | .NET 10，依赖框架 | ~280 KB | 是，需装 .NET 10 Desktop Runtime |
 | .NET 10，自包含单文件 | ~70 MB | 否 |
@@ -48,8 +48,8 @@
 本项目此前正是走的 4.8 这条路，代价是运行在一个不再演进、缺少现代 API 的运行时上。
 
 Native AOT 换了个方向：不去找机器上已有的运行时，而是把运行时需要的部分直接编译进 exe。
-代价是体积从几百 KB 涨到十余 MB，换来的是现代 .NET 的 API、更快的启动（无 JIT 预热）
-和更低的内存占用。
+代价是体积从几百 KB 涨到约 20 MB——WinForms 基本裁不动，这部分就是主要来源；
+换来的是现代 .NET 的 API、更快的启动（无 JIT 预热）和更低的内存占用。
 
 #### WinForms 不是「官方支持」Native AOT 吗？
 
@@ -68,6 +68,14 @@ ComWrappers.RegisterForMarshalling(WinFormsComInterop.WinFormsComWrappers.Instan
 
 本项目本身不用剪贴板、不用拖放、不托管 ActiveX，踩到这些路径的机会本来就少，
 注册也做成了「失败只记日志、不影响启动」。
+
+**这层兜底并不完整，得说清楚**：`WinFormsComInterop` 0.5.0 是照着更早版本的 WinForms 内部
+类型写的，在 .NET 10 上有几个代理解析不到对应类型（UIA 的 `IRawElementProviderSimple`、
+ActiveX 站点的 `IServiceProvider`、MSHTML 的 `IHTMLDocument4`），publish 日志里能看到
+ILC 说这些方法「will always throw」。它们分别对应辅助功能提供程序、ActiveX 宿主和
+`WebBrowser` 控件——本项目一个都没用到。同理，`System.Windows.Forms` 自身在 publish 时会报
+一批 IL3053 / IL3000 裁剪警告，这是 WinForms 尚未标注裁剪安全的正常结果，不影响构建
+（`-warnaserror` 只加在 `dotnet build` 上）。
 
 托盘右键菜单：
 

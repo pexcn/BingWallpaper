@@ -6,8 +6,8 @@
       .NET 10 plus Native AOT. Nothing of .NET is in-box on Windows, so the choice is
       between shipping a runtime installer, a ~70 MB self contained framework build or
       an ahead of time compiled executable. Native AOT keeps the one file, no install
-      promise of the old .NET Framework 4.8 build - the price is roughly ten megabytes
-      instead of a few hundred kilobytes.
+      promise of the old .NET Framework 4.8 build - the price is about 20 MB instead of
+      a few hundred kilobytes (CI prints the exact size of every published file).
       Windows Forms is not officially supported by Native AOT: the pieces that need
       COM (drag and drop, the clipboard, accessibility, ActiveX) marshal through
       interfaces the AOT compiler cannot generate at run time. WinFormsComInterop
