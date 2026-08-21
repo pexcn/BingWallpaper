@@ -230,11 +230,10 @@ internal sealed class SettingsForm : Form
         AddRow(fields, "开机自启", _startupBox);
 
         _closeButton.Text = "关闭";
-        // A fixed size, not AutoSize: ThemeManager swaps FlatStyle between Standard
-        // and Flat with the palette, the two measure differently, and the dialog is
-        // sized once in OnLoad - so an auto sized button ends up clipped after a
-        // theme change. The value is in logical pixels; AutoScaleMode.Dpi scales it.
-        _closeButton.AutoSize = false;
+        // A fixed size, not the measured one: a dialog button is as wide as the
+        // dialog's other buttons rather than as wide as its own caption, and this
+        // one is the only one there is. The value is in logical pixels;
+        // AutoScaleMode.Dpi scales it.
         _closeButton.Size = new Size(92, 30);
         _closeButton.Margin = new Padding(8, 0, 0, 0);
 
@@ -472,7 +471,7 @@ internal sealed class SettingsForm : Form
         _closeButton.Click += (_, _) => Hide();
     }
 
-    private void CommitResolution(RadioButton button, ResolutionKind resolution)
+    private void CommitResolution(ThemedRadioButton button, ResolutionKind resolution)
     {
         if (_loading || !button.Checked || _config.Resolution == resolution)
         {
@@ -483,7 +482,7 @@ internal sealed class SettingsForm : Form
         Persist(SettingKind.Resolution);
     }
 
-    private void CommitTheme(RadioButton button, ThemeMode mode)
+    private void CommitTheme(ThemedRadioButton button, ThemeMode mode)
     {
         if (_loading || !button.Checked || _config.Theme == mode)
         {

@@ -156,7 +156,7 @@ internal sealed class ThumbnailTile : Control
     {
         if (_thumbnail is null)
         {
-            using (SolidBrush placeholder = new(palette.ControlBackground))
+            using (SolidBrush placeholder = new(palette.Field))
             {
                 g.FillRectangle(placeholder, picture);
             }

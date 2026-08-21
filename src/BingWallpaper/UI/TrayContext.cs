@@ -22,18 +22,18 @@ internal sealed class TrayContext : ApplicationContext
     private readonly BingClient _client = new();
     private readonly HiddenWindow _window;
     private readonly NotifyIcon _tray;
-    private readonly ContextMenuStrip _menu;
+    private readonly FluentMenuStrip _menu;
     private readonly System.Windows.Forms.Timer _timer;
 
-    private readonly ToolStripMenuItem _titleItem;
-    private readonly ToolStripMenuItem _newerItem;
-    private readonly ToolStripMenuItem _olderItem;
-    private readonly ToolStripMenuItem _historyItem;
-    private readonly ToolStripMenuItem _refreshItem;
-    private readonly ToolStripMenuItem _pinItem;
-    private readonly ToolStripMenuItem _folderItem;
-    private readonly ToolStripMenuItem _settingsItem;
-    private readonly ToolStripMenuItem _exitItem;
+    private readonly FluentMenuItem _titleItem;
+    private readonly FluentMenuItem _newerItem;
+    private readonly FluentMenuItem _olderItem;
+    private readonly FluentMenuItem _historyItem;
+    private readonly FluentMenuItem _refreshItem;
+    private readonly FluentMenuItem _pinItem;
+    private readonly FluentMenuItem _folderItem;
+    private readonly FluentMenuItem _settingsItem;
+    private readonly FluentMenuItem _exitItem;
 
     private readonly CancellationTokenSource _shutdown = new();
 
@@ -56,43 +56,37 @@ internal sealed class TrayContext : ApplicationContext
         // The title row doubles as the "open the image source" command. It has to be
         // enabled to raise Click at all, so it only greys out - and reads as a plain
         // header - while there is no link behind it.
-        _titleItem = new ToolStripMenuItem("正在获取今日壁纸…", null, (_, _) => OpenCopyrightLink())
+        _titleItem = new FluentMenuItem("正在获取今日壁纸…", (_, _) => OpenCopyrightLink())
         {
             Enabled = false,
             ToolTipText = "查看图片来源",
         };
-        _newerItem = new ToolStripMenuItem("下一张", null, (_, _) => MoveBy(-1)) { Enabled = false };
-        _olderItem = new ToolStripMenuItem("上一张", null, (_, _) => MoveBy(1)) { Enabled = false };
-        _historyItem = new ToolStripMenuItem("选择日期…", null, (_, _) => ShowHistory());
-        _refreshItem = new ToolStripMenuItem("立即刷新", null, (_, _) => StartRefresh(userInitiated: true));
-        _pinItem = new ToolStripMenuItem("固定当前壁纸", null, (_, _) => TogglePin())
+        _newerItem = new FluentMenuItem("下一张", (_, _) => MoveBy(-1)) { Enabled = false };
+        _olderItem = new FluentMenuItem("上一张", (_, _) => MoveBy(1)) { Enabled = false };
+        _historyItem = new FluentMenuItem("选择日期…", (_, _) => ShowHistory());
+        _refreshItem = new FluentMenuItem("立即刷新", (_, _) => StartRefresh(userInitiated: true));
+        _pinItem = new FluentMenuItem("固定当前壁纸", (_, _) => TogglePin())
         {
             Enabled = false,
             ToolTipText = "固定后不再随检查间隔自动更换",
         };
-        _folderItem = new ToolStripMenuItem("打开壁纸目录", null, (_, _) => OpenWallpaperFolder());
-        _settingsItem = new ToolStripMenuItem("设置…", null, (_, _) => ShowSettings());
-        _exitItem = new ToolStripMenuItem("退出", null, (_, _) => ExitApplication());
+        _folderItem = new FluentMenuItem("打开壁纸目录", (_, _) => OpenWallpaperFolder());
+        _settingsItem = new FluentMenuItem("设置…", (_, _) => ShowSettings());
+        _exitItem = new FluentMenuItem("退出", (_, _) => ExitApplication());
 
-        _menu = new ContextMenuStrip();
-        Font? menuFont = SystemFonts.MenuFont;
-        if (menuFont is not null)
-        {
-            _menu.Font = menuFont;
-        }
-
+        _menu = new FluentMenuStrip();
         _menu.Items.AddRange(new ToolStripItem[]
         {
             _titleItem,
-            new ToolStripSeparator(),
+            new FluentMenuSeparator(),
             _olderItem,
             _newerItem,
             _historyItem,
             _refreshItem,
             _pinItem,
-            new ToolStripSeparator(),
+            new FluentMenuSeparator(),
             _folderItem,
-            new ToolStripSeparator(),
+            new FluentMenuSeparator(),
             _settingsItem,
             _exitItem,
         });
@@ -111,7 +105,6 @@ internal sealed class TrayContext : ApplicationContext
         _timer.Start();
 
         ThemeManager.ThemeChanged += OnThemeChanged;
-        ThemeManager.ApplyToMenu(_menu);
 
         // Before the first network call: from here on the cleanup passes and the
         // menu have something to work with even while the metadata request is still
@@ -239,7 +232,7 @@ internal sealed class TrayContext : ApplicationContext
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
-        ThemeManager.ApplyToMenu(_menu);
+        _menu.ApplyTheme();
         if (_settingsForm is { IsDisposed: false })
         {
             ThemeManager.ApplyToForm(_settingsForm);
@@ -620,10 +613,6 @@ internal sealed class TrayContext : ApplicationContext
         // The picker paints the same state on a tile, and it can be open while this
         // runs - stepping through the list from the tray menu moves both badges.
         _historyForm?.RefreshCurrentMarker();
-
-        // Every Enabled flag above was just recomputed, and the item colours follow
-        // them. Not ApplyToMenu: that also builds a renderer, which nothing here needs.
-        ThemeManager.RefreshMenuItemColors(_menu);
     }
 
     private void ShowSettings()

@@ -16,6 +16,8 @@
 - 可固定某一张壁纸，不再随检查间隔自动更换，重启后依旧保持
 - 六种填充方式：填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨区
 - 手写深色模式，**在 Windows 10 上同样有效**（不依赖仅 Windows 11 可用的 `Application.SetColorMode`），可跟随系统实时切换
+- 设置窗口是一个标准 Win32 对话框，浅色下的控件由系统主题绘制，与系统自带对话框逐像素一致；
+  托盘菜单则按 WinUI 3 的 MenuFlyout 绘制——圆角、悬停高亮内缩成圆角块、Fluent 图标字体的勾选标记
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹 = 完整卸载
 - 零第三方依赖（仅 BCL + P/Invoke），**单个几百 KB 的 exe，无需安装任何运行时**
 
@@ -188,8 +190,25 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
 - 下载先写 `.tmp`、解码校验通过后再原子改名，避免半截文件被当作有效缓存
 - 全局异常钩子（`Application.ThreadException`、`AppDomain.UnhandledException`、`TaskScheduler.UnobservedTaskException`）
   会把完整异常链写入日志并弹出可复制文本的错误对话框
-- 单选框 / 复选框为自绘控件：系统绘制的字形在深色背景下会变成「黑底黑点」，自绘后选中态在两种主题下
-  都是强调色蓝
+- 对话框控件只有一条规则：**浅色交给系统主题，深色自己画**（`UI/ControlPainter.cs` 是唯一知道这条规则的地方）。
+  浅色下复选框 / 单选框 / 按钮 / 下拉框由 uxtheme 绘制（`CheckBoxRenderer` / `RadioButtonRenderer` /
+  `ButtonRenderer`，以及 `COMBOBOX` 主题类的 `CP_READONLY` / `CP_DROPDOWNBUTTONRIGHT`）——与系统对话框里的
+  控件是同一套像素，而不是仿得像；深色下 Windows 根本没有对话框控件的深色部件（`DarkMode_*` 主题类只覆盖
+  列表视图、滚动条、菜单和编辑框边框），于是改由调色板绘制，但尺寸仍从主题读取，两种主题、任意 DPI 下版式完全一致
+- 复选框 / 单选框不继承自 `CheckBox` / `RadioButton`：系统绘制的字形在深色背景下会变成「黑底黑点」，
+  而绕开它的每一种办法（`FlatStyle`、`Appearance`、`UserPaint`）都会改变控件自身的测量结果，
+  两种主题的版式就会不一样。现在版式取自 WinForms 自己的算法（13 像素字形、其后 1 像素空隙、
+  文字四周 2 像素内衬），单选组保留 Win32 的互斥、方向键切换与「整组只有一个 Tab 位」
+- 下拉框打开 `ControlStyles.UserPaint` 完全自绘：WinForms 的 `ComboBox` 只在该样式关闭时自行处理 `WM_PAINT`，
+  打开后 `Control.WndProc` 把消息交给 `WmPaint`（后台缓冲 + `OnPaint`）而不是 `DefWndProc`，原生控件不再绘制——
+  不必在原生绘制之上再盖一层，鼠标划过时的闪烁也就没有了。文字区与按钮的位置由 `GetComboBoxInfo` 向控件本人问得；
+  下拉列表是另一个窗口：背景取 `BackColor`，条目自绘，边框与滚动条用 `DarkMode_Explorer` 主题
+- 托盘菜单不是「换了配色的 ToolStrip」，而是照 WinUI 3 的 `MenuFlyout_themeresources.xaml` 重建的：
+  条目边距 4,2,4,2、内衬 11,8,11,9、勾选列 28 像素、圆角 4（条目）/ 8（浮出控件），配色是 WinUI 的
+  `SubtleFillColor*` / `TextFillColor*` / `SurfaceStrokeColorFlyout`（带 alpha，按浮出控件背景预先合成为不透明色，
+  因为 GDI 的 `TextRenderer` 没有 alpha 可用）。圆角在 Windows 11 上交给
+  `DwmSetWindowAttribute(33, DWMWCP_ROUND)`，返回 `E_INVALIDARG` 时（Windows 10）退回窗口区域裁剪。
+  由于所有颜色都在绘制时从调色板取，菜单项上永远不会被写入颜色——「先禁用后启用的菜单项一直是灰的」这个坑从结构上消失了
 - 全球化功能保持启用：曾经开启的 `InvariantGlobalization`（.NET 10 时期）会让 WinForms 在切换输入法
   （`WM_INPUTLANGCHANGE` → `CultureInfo.GetCultureInfo(lcid)`）时直接崩溃
 

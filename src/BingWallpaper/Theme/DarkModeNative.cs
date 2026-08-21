@@ -24,8 +24,11 @@ internal static class DarkModeNative
     /// <summary>DWMWA_USE_IMMERSIVE_DARK_MODE, stable value since build 19041.</summary>
     private const int DwmwaUseImmersiveDarkMode = 20;
 
-    /// <summary>PreferredAppMode.AllowDark</summary>
-    private const int PreferredAppModeAllowDark = 1;
+    /// <summary>DWMWA_WINDOW_CORNER_PREFERENCE, Windows 11 (build 22000) and later.</summary>
+    private const int DwmwaWindowCornerPreference = 33;
+
+    /// <summary>DWMWCP_ROUND - the eight pixel radius Windows 11 rounds a flyout with.</summary>
+    private const int DwmwcpRound = 2;
 
     /// <summary>PreferredAppMode.ForceDark</summary>
     private const int PreferredAppModeForceDark = 2;
@@ -132,6 +135,42 @@ internal static class DarkModeNative
     }
 
     /// <summary>
+    /// Asks DWM to round the corners of a window, and reports whether it did.
+    ///
+    /// <para>
+    /// This is the Windows 11 way, and the only one that gets anti aliased corners
+    /// and the shadow that belongs to them. On Windows 10 the attribute does not
+    /// exist and DwmSetWindowAttribute answers E_INVALIDARG, which is the signal the
+    /// caller needs to fall back to clipping the window with a rounded region.
+    /// </para>
+    /// </summary>
+    public static bool TryRoundCorners(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            int preference = DwmwcpRound;
+            int hr = DwmSetWindowAttribute(handle, DwmwaWindowCornerPreference, ref preference, sizeof(int));
+            if (hr == 0)
+            {
+                return true;
+            }
+
+            Logger.Debug("DwmSetWindowAttribute(33) returned HRESULT 0x" + hr.ToString("X8") + ", rounding by region instead.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("DwmSetWindowAttribute(33) failed: " + ex.Message);
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Applies a themed window class. "DarkMode_Explorer" darkens list views, tree
     /// views and scroll bars; "DarkMode_CFD" darkens combo box and edit borders.
     /// Passing null restores the default theme.
@@ -150,20 +189,6 @@ internal static class DarkModeNative
         catch (Exception ex)
         {
             Logger.Debug("SetWindowTheme failed: " + ex.Message);
-        }
-    }
-
-    /// <summary>Kept for completeness; AllowDark is the softer variant of ForceDark.</summary>
-    public static void SetAllowDarkAppMode()
-    {
-        try
-        {
-            SetPreferredAppMode(PreferredAppModeAllowDark);
-            RefreshImmersiveColorPolicyState();
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug("SetPreferredAppMode(AllowDark) failed: " + ex.Message);
         }
     }
 }

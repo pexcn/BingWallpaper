@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Runtime.InteropServices;
 
 namespace BingWallpaper;
@@ -40,6 +41,41 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    /// <summary>user32!GetComboBoxInfo. Available since Windows 2000.</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetComboBoxInfo(IntPtr hwndCombo, ref COMBOBOXINFO info);
+
+    /// <summary>RECT, windef.h.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+
+        public Rectangle ToRectangle() => Rectangle.FromLTRB(Left, Top, Right, Bottom);
+    }
+
+    /// <summary>
+    /// COMBOBOXINFO, winuser.h. The drop down asks the control itself where its
+    /// text area and its button are, rather than working them out again, and the
+    /// list is a window of its own whose frame and scroll bar have to be themed
+    /// separately from the combo box that owns it.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct COMBOBOXINFO
+    {
+        public int cbSize;
+        public RECT rcItem;
+        public RECT rcButton;
+        public int stateButton;
+        public IntPtr hwndCombo;
+        public IntPtr hwndItem;
+        public IntPtr hwndList;
+    }
 
     /// <summary>Reads the system DPI, falling back to 96 when the call fails.</summary>
     public static uint GetSystemDpiSafe()
