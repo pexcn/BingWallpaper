@@ -51,6 +51,36 @@ jobs:
       - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
+      # Temporary: what does the XAML runtime ask for, and what does the resource
+      # index actually contain? See the note in the commit that added this.
+      - name: Diagnose XAML resources
+        shell: pwsh
+        run: |
+          "### LoadComponent calls in the generated code"
+          Get-ChildItem src/BingWallpaper/obj -Recurse -Filter *.g.i.cs |
+            Select-String -Pattern "LoadComponent|ms-appx" |
+            ForEach-Object { $_.Line.Trim() } | Select-Object -Unique
+
+          "### .pri / .xbf in the build output"
+          Get-ChildItem src/BingWallpaper/bin -Recurse -File |
+            Where-Object { $_.Extension -in '.pri', '.xbf' } |
+            ForEach-Object { "{0,-90} {1,9:N0}" -f $_.FullName.Replace("$pwd\", ''), $_.Length }
+
+          "### .pri / .xbf in the publish output"
+          Get-ChildItem publish -Recurse -File |
+            Where-Object { $_.Extension -in '.pri', '.xbf' } |
+            ForEach-Object { "{0,-60} {1,9:N0}" -f $_.Name, $_.Length }
+
+          "### resources.pri contents"
+          $makepri = Get-ChildItem "$env:USERPROFILE\.nuget\packages" -Recurse -Filter makepri.exe -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $makepri) { "makepri.exe not found" }
+          elseif (-not (Test-Path publish/resources.pri)) { "publish/resources.pri does not exist" }
+          else {
+            & $makepri.FullName dump /if publish/resources.pri /of pri-dump.xml /o | Out-Null
+            Get-Content pri-dump.xml | Select-Object -First 150
+          }
+
       # The native PDB the AOT compiler emits is four times the size of the program
       # itself and of no use to anyone running it, so it is kept as its own artifact
       # rather than shipped.
