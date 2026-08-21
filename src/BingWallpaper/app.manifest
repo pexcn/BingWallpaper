@@ -34,11 +34,12 @@
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <!--
-        System DPI awareness, not PerMonitorV2. Windows Forms on .NET Framework only
-        implements per-monitor scaling when an app.config switch is present, and we
-        want the program to stay a single file. System awareness plus
-        AutoScaleMode.Font scales correctly for the monitor the app starts on;
-        a second monitor with a different scaling factor is bitmap stretched by Windows.
+        System DPI awareness, not PerMonitorV2, even though modern .NET could do the
+        latter. The owner drawn parts of this UI (check boxes, radio buttons, the
+        thumbnail tiles) size their glyphs from DpiScale, a single factor captured at
+        startup, and every layout constant is a logical pixel scaled once. System
+        awareness scales correctly for the monitor the app starts on; a second monitor
+        with a different scaling factor is bitmap stretched by Windows.
       -->
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>

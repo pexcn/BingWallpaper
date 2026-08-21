@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -120,9 +121,7 @@ internal sealed class AppConfig
     /// <summary>Normalizes a market code to the "xx-YY" shape Bing expects.</summary>
     public static string NormalizeMarket(string? market)
     {
-        // string.IsNullOrWhiteSpace has no [NotNullWhen(false)] annotation in the
-        // .NET Framework reference assemblies, so the null check is written out.
-        if (market is null || market.Trim().Length == 0)
+        if (string.IsNullOrWhiteSpace(market))
         {
             return "zh-CN";
         }
@@ -257,10 +256,17 @@ internal sealed class AppConfig
         };
     }
 
-    private static TEnum ParseEnum<TEnum>(string value, TEnum fallback)
+    /// <summary>
+    /// Enum.TryParse reads the public fields of the enum by reflection, so the type
+    /// argument has to carry the annotation that keeps those fields alive through
+    /// trimming; without it the AOT analyser reports IL2091 here.
+    /// </summary>
+    private static TEnum ParseEnum<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields)] TEnum>(
+        string value,
+        TEnum fallback)
         where TEnum : struct, Enum
         => Enum.TryParse(value.Trim(), ignoreCase: true, out TEnum parsed) ? parsed : fallback;
 
-    /// <summary>Math.Clamp does not exist on .NET Framework.</summary>
+    /// <summary>Kept over Math.Clamp so the argument order can never surprise.</summary>
     public static int Clamp(int value, int min, int max) => value < min ? min : value > max ? max : value;
 }

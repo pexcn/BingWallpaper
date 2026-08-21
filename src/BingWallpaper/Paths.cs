@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Reflection;
 
 namespace BingWallpaper;
 
@@ -16,19 +15,17 @@ internal static class Paths
 
     static Paths()
     {
+        // Environment.ProcessPath is the path of the running executable itself, which
+        // is the only thing that means anything here: a Native AOT binary has no
+        // managed assembly on disk, so Assembly.Location is an empty string.
         string? exe = null;
         try
         {
-            exe = Assembly.GetEntryAssembly()?.Location;
+            exe = Environment.ProcessPath;
         }
         catch (Exception)
         {
             exe = null;
-        }
-
-        if (string.IsNullOrEmpty(exe))
-        {
-            exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
         }
 
         if (!string.IsNullOrEmpty(exe))
@@ -107,8 +104,8 @@ internal static class Paths
 
     /// <summary>
     /// Replaces <paramref name="destination"/> with <paramref name="source"/>.
-    /// File.Move has no overwrite overload on .NET Framework, and File.Replace is
-    /// the atomic option when the destination already exists.
+    /// File.Replace is the atomic option when the destination already exists, and it
+    /// keeps the "a half written file can never look valid" guarantee of the caller.
     /// </summary>
     public static void MoveOverwrite(string source, string destination)
     {

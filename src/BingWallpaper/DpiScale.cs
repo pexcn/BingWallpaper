@@ -9,7 +9,7 @@ namespace BingWallpaper;
 /// The application is system-DPI aware (see app.manifest), so a single factor is
 /// correct for every window. Using this instead of Control.LogicalToDeviceUnits
 /// keeps the owner drawn glyphs independent of the Windows Forms high DPI
-/// internals, which on .NET Framework only activate through an app.config switch.
+/// internals, which have changed more than once between runtime versions.
 /// </summary>
 internal static class DpiScale
 {

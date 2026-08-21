@@ -3,23 +3,34 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <!--
-      .NET Framework 4.8 on purpose: it is the newest runtime that ships *inside*
-      Windows 10 (1903 and later, which includes LTSC 2021 / build 19044), so the
-      executable stays a couple of hundred KB and needs no runtime install.
-      No version of modern .NET (5 through 10) is part of Windows, which is why a
-      .NET 10 build either needs a runtime install or a ~47 MB self contained exe.
-      4.8.1 is not an option: it is only in-box on Windows 11 22H2 and later.
+      .NET 10 plus Native AOT. Nothing of .NET is in-box on Windows, so the choice is
+      between shipping a runtime installer, a ~70 MB self contained framework build or
+      an ahead of time compiled executable. Native AOT keeps the one file, no install
+      promise of the old .NET Framework 4.8 build - the price is roughly ten megabytes
+      instead of a few hundred kilobytes.
+      Windows Forms is not officially supported by Native AOT: the pieces that need
+      COM (drag and drop, the clipboard, accessibility, ActiveX) marshal through
+      interfaces the AOT compiler cannot generate at run time. WinFormsComInterop
+      below is the community answer to that - see Program.cs.
     -->
-    <TargetFramework>net48</TargetFramework>
-    <PlatformTarget>x64</PlatformTarget>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Native AOT always produces a single architecture binary; x64 as before. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <!--
+      The SDK refuses to trim a Windows Forms application (NETSDK1175), and Native AOT
+      implies trimming. This internal switch is the documented escape hatch used by
+      WinFormsComInterop; it only removes the blanket error, the trim analysers stay on.
+    -->
+    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <!-- Smaller is better for a tray utility; the app is nowhere near CPU bound. -->
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
-    <!-- No NuGet packages, so no binding redirects and no .exe.config are needed. -->
-    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
-    <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
@@ -38,6 +49,15 @@
 
   <ItemGroup>
     <!--
+      ComWrappers implementation for Windows Forms. Without it the first COM call the
+      framework makes inside an AOT binary throws NotSupportedException.
+      https://github.com/kant2002/WinFormsComInterop
+    -->
+    <PackageReference Include="WinFormsComInterop" Version="0.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
       The same file twice: ApplicationIcon above puts it in the Win32 resources of
       the executable (Explorer, task bar, Alt+Tab), this embeds it so the tray can
       pick the frame that matches the current DPI. See UI/AppIcon.cs.
@@ -47,18 +67,6 @@
     <EmbeddedResource Include="Resources\app.ico">
       <LogicalName>BingWallpaper.Resources.app.ico</LogicalName>
     </EmbeddedResource>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!--
-      Framework assemblies that ship with Windows. System.Drawing, System.Core and
-      friends are referenced by the SDK already; these three are not.
-      System.Web.Extensions provides JavaScriptSerializer, which replaces
-      System.Text.Json (that one is not part of .NET Framework).
-    -->
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Net.Http" />
-    <Reference Include="System.Web.Extensions" />
   </ItemGroup>
 
 </Project>

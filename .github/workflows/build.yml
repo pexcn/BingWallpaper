@@ -44,8 +44,10 @@ jobs:
       - name: Build
         run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -warnaserror -p:Version=${{ steps.version.outputs.value }}
 
-      # .NET Framework 4.8 ships with Windows 10 1903+, so the published output is
-      # just the executable - no runtime to bundle, nothing to install.
+      # Native AOT: ILC compiles the whole application, Windows Forms included, into
+      # one native executable, so the published output needs no .NET runtime on the
+      # machine it lands on. Linking is done by the MSVC toolchain that is already
+      # part of the windows-latest image, so there is nothing extra to install here.
       - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
@@ -71,7 +73,7 @@ jobs:
           body: |
             BingWallpaper ${{ steps.version.outputs.value }}
 
-            单个 exe，几百 KB，**无需安装任何运行时**：使用 .NET Framework 4.8，
-            它随 Windows 10 1903 及以上版本（含 LTSC 2021）内置。
+            单个 exe，**无需安装任何运行时**：.NET 10 + Native AOT，整个程序（含 WinForms）
+            已经编译成原生代码，机器上不需要任何 .NET。
 
             放到一个有写入权限的目录后直接运行即可，配置、日志与壁纸都保存在程序所在目录。

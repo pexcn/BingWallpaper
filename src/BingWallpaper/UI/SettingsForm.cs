@@ -75,8 +75,8 @@ internal sealed class SettingsForm : Form
         MinimizeBox = false;
         ShowInTaskbar = true;
         StartPosition = FormStartPosition.CenterScreen;
-        // DPI based scaling, not font based: the .NET Framework default font and the
-        // system UI font have different metrics, which makes font scaling unreliable.
+        // DPI based scaling, not font based: the designer default font and the system
+        // UI font have different metrics, which makes font scaling unreliable.
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         Padding = new Padding(18, 16, 18, 14);
@@ -201,7 +201,9 @@ internal sealed class SettingsForm : Form
 
         AddRow(fields, "分辨率", CreateGroup(_resolution4K, _resolution1080));
 
-        foreach (WallpaperFit fit in (WallpaperFit[])Enum.GetValues(typeof(WallpaperFit)))
+        // The generic overload, not Enum.GetValues(Type): the latter is annotated
+        // [RequiresDynamicCode] because it builds the array type at run time.
+        foreach (WallpaperFit fit in Enum.GetValues<WallpaperFit>())
         {
             _fitBox.Items.Add(WallpaperService.GetFitDisplayName(fit));
         }

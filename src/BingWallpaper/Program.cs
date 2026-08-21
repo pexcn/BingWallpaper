@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -18,6 +19,7 @@ internal static class Program
     private static Mutex? _instanceMutex;
     private static EventWaitHandle? _activateEvent;
     private static TrayContext? _trayContext;
+    private static string? _comWrappersError;
 
     /// <summary>
     /// The program takes no command line arguments: everything it can be told is in
@@ -25,7 +27,35 @@ internal static class Program
     /// the Run key, never from a shell.
     /// </summary>
     [STAThread]
-    private static int Main() => RunGui();
+    private static int Main()
+    {
+        RegisterComWrappers();
+        return RunGui();
+    }
+
+    /// <summary>
+    /// Native AOT cannot build COM marshalling stubs at run time, and Windows Forms
+    /// reaches for COM in more places than it looks: the clipboard, drag and drop,
+    /// the folder browser, accessibility and the shell notification area all go
+    /// through it. WinFormsComInterop supplies a hand written ComWrappers
+    /// implementation covering the interfaces the framework needs; registering it
+    /// has to happen before the first window exists.
+    ///
+    /// The registration is best effort: it throws if it runs twice, and a JIT build
+    /// (dotnet run, the debugger) does not need it at all.
+    /// </summary>
+    private static void RegisterComWrappers()
+    {
+        try
+        {
+            ComWrappers.RegisterForMarshalling(WinFormsComInterop.WinFormsComWrappers.Instance);
+        }
+        catch (Exception ex)
+        {
+            // Logging is not initialised yet, so this can only be recorded later.
+            _comWrappersError = ex.GetType().Name + ": " + ex.Message;
+        }
+    }
 
     /// <summary>One line of environment information, written on every start.</summary>
     private static void LogEnvironment()
@@ -41,6 +71,11 @@ internal static class Program
             " | system theme " + (ThemeManager.IsSystemDark() ? "Dark" : "Light") +
             " | dir " + Paths.BaseDirectory +
             " | writable " + writable + (writable ? string.Empty : " (" + writeError + ")"));
+
+        if (_comWrappersError is not null)
+        {
+            Logger.Warn("Could not register the Windows Forms ComWrappers: " + _comWrappersError);
+        }
     }
 
     private static int RunGui()

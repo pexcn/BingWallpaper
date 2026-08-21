@@ -17,36 +17,57 @@
 - 六种填充方式：填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨区
 - 手写深色模式，**在 Windows 10 上同样有效**（不依赖仅 Windows 11 可用的 `Application.SetColorMode`），可跟随系统实时切换
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹 = 完整卸载
-- 零第三方依赖（仅 BCL + P/Invoke），**单个几百 KB 的 exe，无需安装任何运行时**
+- **单个 exe，无需安装任何运行时**：.NET 10 + Native AOT，整个程序连同 WinForms 一起编译成原生代码
+- 除了让 WinForms 通过 Native AOT 的 `WinFormsComInterop` 之外没有任何第三方依赖（其余只用 BCL + P/Invoke）
 
 ## 系统要求
 
 - Windows 10 1903（build 18362）及以上，64 位；**Windows 10 LTSC 2021（19044）满足要求**
-- **无需安装 .NET 运行时**：程序基于 .NET Framework 4.8，该版本自 Windows 10 1903 起随系统内置
+- **无需安装 .NET 运行时**：Native AOT 产物是原生 exe，机器上不需要任何 .NET
 
 ## 安装与使用
 
-1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，约 200 KB）
+1. 从 [Releases](../../releases) 下载 `BingWallpaper.exe`（单文件，Native AOT 产物，十余 MB；准确大小见 Release 页面）
 2. 放到一个**有写入权限**的目录（例如 `D:\Tools\BingWallpaper\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
 3. 双击运行，托盘出现图标后即开始工作
 
-### 为什么用 .NET Framework 4.8 而不是 .NET 10？
+### 为什么用 .NET 10 + Native AOT？
 
-因为要做到「体积小 **且** 免安装」，在 Windows 上只有这一条路：
+目标始终是「单文件 **且** 免安装」。在 Windows 上能同时满足这两条的方案只有两种：
 
 | 方案 | 体积 | 是否需要安装运行时 |
 |---|---|---|
-| .NET Framework 4.8（本项目） | ~200 KB | **否**，Windows 10 1903+ 内置 |
+| .NET 10 + Native AOT（本项目） | 十余 MB | **否**，已编译成原生代码 |
+| .NET Framework 4.8 | ~200 KB | **否**，Windows 10 1903+ 内置 |
 | .NET 10，依赖框架 | ~280 KB | 是，需装 .NET 10 Desktop Runtime |
-| .NET 10，自包含单文件 | ~47 MB | 否 |
+| .NET 10，自包含单文件 | ~70 MB | 否 |
 
-.NET 5 及以后（.NET Core 血统）**没有任何版本内置于 Windows**，所以「把 .NET 10 降到 .NET 8」并不能免安装。
-能免安装的最高版本就是 .NET Framework 4.8——4.8.1 只在 Windows 11 22H2+ 内置，Win10 上仍需手动安装。
-体积小的开源 Windows 工具（例如 shadowsocks-windows 4.x）走的也是同一条路。
+.NET 5 及以后（.NET Core 血统）**没有任何版本内置于 Windows**，所以「降版本」并不能免安装；
+唯一内置的是 .NET Framework 4.8（4.8.1 只在 Windows 11 22H2+ 内置）。
+本项目此前正是走的 4.8 这条路，代价是运行在一个不再演进、缺少现代 API 的运行时上。
 
-代价是 .NET Framework 不再演进，且缺少一些现代 API；本项目相应地自己实现了 JSON 解析之外的
-兼容处理（见「技术说明」）。
+Native AOT 换了个方向：不去找机器上已有的运行时，而是把运行时需要的部分直接编译进 exe。
+代价是体积从几百 KB 涨到十余 MB，换来的是现代 .NET 的 API、更快的启动（无 JIT 预热）
+和更低的内存占用。
+
+#### WinForms 不是「官方支持」Native AOT 吗？
+
+不是。微软至今没有把 Windows Forms 列入 Native AOT 的支持范围：WinForms 内部大量依赖
+COM（剪贴板、拖放、辅助功能、ActiveX 宿主），而这些 COM 封送代码在传统模式下是运行时生成的，
+AOT 编译器没法生成。SDK 甚至会直接拒绝对 WinForms 项目开启裁剪。
+
+社区方案是 [kant2002/WinFormsComInterop](https://github.com/kant2002/WinFormsComInterop)（MIT）：
+它手写了一份 `ComWrappers` 实现，覆盖 WinForms 需要的那些 COM 接口，于是这些调用不再需要
+运行时代码生成。用法只有两处——项目文件里加 `<PublishAot>` 与 `<_SuppressWinFormsTrimError>`
+解除 SDK 的封锁，`Program.cs` 里在创建任何窗口之前注册：
+
+```csharp
+ComWrappers.RegisterForMarshalling(WinFormsComInterop.WinFormsComWrappers.Instance);
+```
+
+本项目本身不用剪贴板、不用拖放、不托管 ActiveX，踩到这些路径的机会本来就少，
+注册也做成了「失败只记日志、不影响启动」。
 
 托盘右键菜单：
 
@@ -149,14 +170,17 @@ PinnedWallpaper=            ; 固定的壁纸文件名，留空 = 跟随检查�
 
 ## 构建
 
-需要 .NET SDK（用于 `dotnet` 命令）与 .NET Framework 4.8 目标包（Visual Studio 或 Build Tools 自带）：
+需要 .NET 10 SDK，以及 Native AOT 链接所需的 MSVC 工具链
+（Visual Studio 2022 的「使用 C++ 的桌面开发」工作负载，或同等的 Build Tools + Windows SDK）：
 
 ```powershell
 dotnet build   src/BingWallpaper/BingWallpaper.csproj -c Release
 dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish
 ```
 
-产物是单个 `publish\BingWallpaper.exe`，没有附带 DLL，也没有 `.exe.config`。
+`dotnet build` 只做 IL 编译（速度快，够日常改代码用），真正的 AOT 编译发生在 `dotnet publish`。
+产物是单个 `publish\BingWallpaper.exe`（旁边的 `.pdb` 是原生符号，发布时不需要），
+没有附带 DLL，也没有 `.deps.json` / `.runtimeconfig.json`。
 
 CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建，
 并以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把 exe 挂到 GitHub Release 上
@@ -164,13 +188,19 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
 
 ## 技术说明
 
-- C# + WinForms（`net48`，C# 最新语言版本），UI 全部由代码构建，无窗体设计器、无 `.Designer.cs`
-- JSON 用 `JavaScriptSerializer`（`System.Web.Extensions`，随 .NET Framework 内置）解析，
-  因为 `System.Text.Json` 不属于 .NET Framework，而本项目不引入任何 NuGet 包
-- 按系统 DPI 感知（`dpiAware=true`）+ `AutoScaleMode.Dpi` 缩放；.NET Framework 的 WinForms 只有在
-  额外的 app.config 开关下才支持 PerMonitorV2，为保持单文件而放弃该特性（多显示器不同缩放时由系统拉伸）
-- 显式套用系统 UI 字体（`SystemFonts.MessageBoxFont`）：.NET Framework 的控件默认字体仍是
-  MS Sans Serif 8.25pt
+- C# + WinForms（`net10.0-windows`，C# 最新语言版本），UI 全部由代码构建，无窗体设计器、无 `.Designer.cs`
+- Native AOT（`PublishAot`）：`dotnet publish` 由 ILC 把 IL 编译成原生代码并用 MSVC 链接成单个 exe。
+  WinForms 并不在官方支持范围内，靠 `WinFormsComInterop` 的 `ComWrappers` 实现补上 COM 封送
+  （详见上面「WinForms 不是官方支持 Native AOT 吗？」）
+- 代码里刻意避开需要运行时生成代码的 API，这样 `-warnaserror` 下不会有裁剪 / AOT 警告：
+  JSON 用 `JsonDocument` 逐节点读（不走反射序列化，也不需要 `JsonSerializerContext`）、
+  枚举用泛型的 `Enum.GetValues<T>()` 而不是 `Enum.GetValues(Type)`、
+  程序路径用 `Environment.ProcessPath` 而不是 `Assembly.Location`（AOT 下后者恒为空串）
+- 按系统 DPI 感知（`dpiAware=true`）+ `AutoScaleMode.Dpi` 缩放。现代 .NET 的 WinForms 本可以做
+  PerMonitorV2，但自绘控件与缩略图的字形都按启动时捕获的单一缩放系数（`DpiScale`）绘制，
+  维持系统级感知才与之自洽（多显示器不同缩放时由系统拉伸）
+- 显式套用系统 UI 字体（`SystemFonts.MessageBoxFont`）：WinForms 的默认字体是写死的 Segoe UI 9pt，
+  既不跟随用户的字号设置，也不是中文系统实际在用的 Microsoft YaHei UI
 - 图标是一个多分辨率 `.ico`（256/128/64/48/32/24/20/16），同一个文件既由 `ApplicationIcon` 编进 exe 的
   Win32 资源（资源管理器、任务栏、Alt+Tab），也作为嵌入资源打包：托盘按当前 DPI 要 16/20/24 像素，而
   `Icon.ExtractAssociatedIcon` 只会给出 32×32；窗口图标同样要显式赋值，WinForms 不继承 exe 图标
@@ -190,8 +220,8 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   会把完整异常链写入日志并弹出可复制文本的错误对话框
 - 单选框 / 复选框为自绘控件：系统绘制的字形在深色背景下会变成「黑底黑点」，自绘后选中态在两种主题下
   都是强调色蓝
-- 全球化功能保持启用：曾经开启的 `InvariantGlobalization`（.NET 10 时期）会让 WinForms 在切换输入法
-  （`WM_INPUTLANGCHANGE` → `CultureInfo.GetCultureInfo(lcid)`）时直接崩溃
+- 全球化功能保持启用：`InvariantGlobalization` 能再省下一点体积，但会让 WinForms 在切换输入法
+  （`WM_INPUTLANGCHANGE` → `CultureInfo.GetCultureInfo(lcid)`）时直接崩溃，所以不开
 
 ## 免责声明
 

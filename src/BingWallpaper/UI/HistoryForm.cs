@@ -46,7 +46,7 @@ internal sealed class HistoryForm : Form
 
         Text = "选择日期";
         // Windows Forms does not inherit the icon of the executable: without this the
-        // title bar and the task bar show the default .NET Framework window icon.
+        // title bar and the task bar show the default Windows Forms window icon.
         Icon = AppIcon.Window;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleDimensions = new SizeF(96F, 96F);

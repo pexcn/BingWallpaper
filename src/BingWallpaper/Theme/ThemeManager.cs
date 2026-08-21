@@ -108,9 +108,9 @@ internal static class ThemeManager
     };
 
     /// <summary>
-    /// Applies the real Windows UI font. .NET Framework still defaults controls to
-    /// MS Sans Serif 8.25pt, which looks dated and measures differently from the
-    /// font the rest of the system uses (Segoe UI / Microsoft YaHei UI 9pt).
+    /// Applies the real Windows UI font. The Windows Forms default is a hard coded
+    /// Segoe UI 9pt, which ignores both the user's font size setting and the font a
+    /// non-Latin system actually uses (Microsoft YaHei UI on a Chinese Windows).
     /// </summary>
     public static void ApplySystemFont(Control control)
     {

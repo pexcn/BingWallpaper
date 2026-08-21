@@ -84,9 +84,9 @@
 - **主键是 `file`**（Windows 下大小写不敏感比较）。用户自带的图没有 `imageId` / `startdate`，
   而文件名是目录里唯一必然存在的东西。
 - `market` / `title` / `copyright` 取**首次获取时那个市场**的值（同一张图在 de-DE 下标题是德文）。
-- **读**用现成的 `JavaScriptSerializer`；**写**要自己来——它只输出压缩成一行的 JSON，跟
-  「纯文本可手改」的调性冲突，也不利于看 diff。手写一个带缩进的输出器很小（转义只有
-  `"`、`\`、控制字符三类），UTF-8 无 BOM，`.tmp` + 原子改名。
+- **读**用 `JsonDocument`，**写**用 `Utf8JsonWriter` 并开 `JsonWriterOptions.Indented`——
+  项目转到 .NET 10 之后这两样都是现成的，原计划里那个手写缩进输出器不必再做了。
+  两者都不走反射，Native AOT 下无需 `JsonSerializerContext`。UTF-8 无 BOM，`.tmp` + 原子改名。
 - **解析失败不许静默重建**：坏文件改名成 `favorites.json.bad`，从目录扫描重建，记日志。
 - 只在真有变化时才落盘（脏标记）；对账扫描本身不产生写入。
 
