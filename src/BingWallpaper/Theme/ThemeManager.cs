@@ -239,24 +239,24 @@ internal static class ThemeManager
         }
     }
 
-    /// <summary>Themes a context menu; dark mode needs a custom renderer.</summary>
+    /// <summary>
+    /// Themes a context menu. Both themes go through one renderer, rather than the
+    /// framework's in the light and a custom one in the dark: two renderers drift, and
+    /// the details they drift on (how long a separator is, how a checked row is
+    /// marked) are exactly the ones a screenshot puts side by side. The light theme
+    /// loses nothing by it - its colours are still the framework's own, read off a
+    /// <see cref="System.Windows.Forms.ProfessionalColorTable"/> in
+    /// <see cref="ThemePalette"/>.
+    /// </summary>
     public static void ApplyToMenu(ToolStrip menu)
     {
         ThemePalette palette = Palette;
-        menu.BackColor = palette.ControlBackground;
+        menu.BackColor = palette.MenuBackground;
         menu.ForeColor = palette.Text;
 
-        if (palette.IsDark)
-        {
-            // Assigning a renderer implicitly switches RenderMode to Custom, which is
-            // what the professional renderer subclass needs.
-            menu.Renderer = new DarkContextMenuRenderer(palette);
-        }
-        else
-        {
-            menu.RenderMode = ToolStripRenderMode.Professional;
-            menu.Renderer = new ToolStripProfessionalRenderer();
-        }
+        // Assigning a renderer implicitly switches RenderMode to Custom, which is
+        // what the professional renderer subclass needs.
+        menu.Renderer = new FluentMenuRenderer(palette);
 
         if (menu.IsHandleCreated)
         {
@@ -282,12 +282,12 @@ internal static class ThemeManager
     {
         foreach (ToolStripItem item in items)
         {
-            item.BackColor = palette.ControlBackground;
+            item.BackColor = palette.MenuBackground;
             item.ForeColor = item.Enabled ? palette.Text : palette.SecondaryText;
 
             if (item is ToolStripMenuItem menuItem && menuItem.HasDropDownItems)
             {
-                menuItem.DropDown.BackColor = palette.ControlBackground;
+                menuItem.DropDown.BackColor = palette.MenuBackground;
                 menuItem.DropDown.ForeColor = palette.Text;
                 ApplyToMenuItems(menuItem.DropDownItems, palette);
             }
