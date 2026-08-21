@@ -6,7 +6,7 @@ namespace BingWallpaper;
 /// <summary>
 /// One process wide scaling factor, captured from the system DPI at startup.
 ///
-/// The application is system-DPI aware (see app.manifest), so a single factor is
+/// The application is system-DPI aware (Program.RunGui sets it), so a single factor is
 /// correct for every window. Using this instead of Control.LogicalToDeviceUnits
 /// keeps the owner drawn glyphs independent of the Windows Forms high DPI
 /// internals, which have changed more than once between runtime versions.

@@ -49,8 +49,7 @@ internal sealed class BingClient : IDisposable
             AllowAutoRedirect = true,
         };
 
-        // Static on modern .NET; it reports whether the platform handler can decompress.
-        if (HttpClientHandler.SupportsAutomaticDecompression)
+        if (handler.SupportsAutomaticDecompression)
         {
             handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
         }

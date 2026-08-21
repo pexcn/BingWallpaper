@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -53,7 +54,16 @@ internal sealed class ThumbnailTile : Control
 
     public BingImageInfo Info { get; }
 
-    /// <summary>The tile owns the bitmap and disposes it.</summary>
+    /// <summary>
+    /// The tile owns the bitmap and disposes it.
+    /// </summary>
+    /// <remarks>
+    /// The DesignerSerializationVisibility attributes on this and the two properties
+    /// below are what the WFO1000 analyser asks for. Nothing here is ever serialised -
+    /// there is no designer in this project, every control is built in code - so
+    /// Hidden is both the honest answer and the one that keeps the build warning free.
+    /// </remarks>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public Image? Thumbnail
     {
         get => _thumbnail;
@@ -71,6 +81,7 @@ internal sealed class ThumbnailTile : Control
     }
 
     /// <summary>Whether this entry is the wallpaper currently on the desktop.</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool IsCurrent
     {
         get => _isCurrent;
@@ -91,6 +102,7 @@ internal sealed class ThumbnailTile : Control
     /// current as well - the pin always follows the wallpaper on the desktop - so it
     /// relabels the badge that is already there instead of adding a second one.
     /// </summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public bool IsPinned
     {
         get => _isPinned;

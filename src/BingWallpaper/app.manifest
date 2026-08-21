@@ -34,14 +34,12 @@
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <!--
-        System DPI awareness, not PerMonitorV2, even though modern .NET could do the
-        latter. The owner drawn parts of this UI (check boxes, radio buttons, the
-        thumbnail tiles) size their glyphs from DpiScale, a single factor captured at
-        startup, and every layout constant is a logical pixel scaled once. System
-        awareness scales correctly for the monitor the app starts on; a second monitor
-        with a different scaling factor is bitmap stretched by Windows.
+        No dpiAware element here on purpose: Windows Forms wants to own the process
+        DPI mode and its analyser (WFO0003) rejects a manifest that sets it behind
+        its back. Application.SetHighDpiMode(SystemAware) in Program.cs does the same
+        job at the same point in time - before the first window - and is the setting
+        this UI is built for; see the comment there.
       -->
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
   </application>

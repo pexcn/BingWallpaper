@@ -196,9 +196,10 @@ CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时�
   JSON 用 `JsonDocument` 逐节点读（不走反射序列化，也不需要 `JsonSerializerContext`）、
   枚举用泛型的 `Enum.GetValues<T>()` 而不是 `Enum.GetValues(Type)`、
   程序路径用 `Environment.ProcessPath` 而不是 `Assembly.Location`（AOT 下后者恒为空串）
-- 按系统 DPI 感知（`dpiAware=true`）+ `AutoScaleMode.Dpi` 缩放。现代 .NET 的 WinForms 本可以做
-  PerMonitorV2，但自绘控件与缩略图的字形都按启动时捕获的单一缩放系数（`DpiScale`）绘制，
-  维持系统级感知才与之自洽（多显示器不同缩放时由系统拉伸）
+- 按系统 DPI 感知 + `AutoScaleMode.Dpi` 缩放。感知级别由 `Application.SetHighDpiMode(SystemAware)`
+  在建第一个窗口之前设定，而不是写在 manifest 里——WinForms 的 WFO0003 分析器不接受后者。
+  现代 .NET 的 WinForms 本可以做 PerMonitorV2，但自绘控件与缩略图的字形都按启动时捕获的
+  单一缩放系数（`DpiScale`）绘制，维持系统级感知才与之自洽（多显示器不同缩放时由系统拉伸）
 - 显式套用系统 UI 字体（`SystemFonts.MessageBoxFont`）：WinForms 的默认字体是写死的 Segoe UI 9pt，
   既不跟随用户的字号设置，也不是中文系统实际在用的 Microsoft YaHei UI
 - 图标是一个多分辨率 `.ico`（256/128/64/48/32/24/20/16），同一个文件既由 `ApplicationIcon` 编进 exe 的

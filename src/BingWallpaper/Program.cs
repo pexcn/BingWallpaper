@@ -20,6 +20,7 @@ internal static class Program
     private static EventWaitHandle? _activateEvent;
     private static TrayContext? _trayContext;
     private static string? _comWrappersError;
+    private static bool _highDpiModeFailed;
 
     /// <summary>
     /// The program takes no command line arguments: everything it can be told is in
@@ -76,10 +77,26 @@ internal static class Program
         {
             Logger.Warn("Could not register the Windows Forms ComWrappers: " + _comWrappersError);
         }
+
+        if (_highDpiModeFailed)
+        {
+            Logger.Warn("Application.SetHighDpiMode(SystemAware) was refused; the process stays DPI unaware.");
+        }
     }
 
     private static int RunGui()
     {
+        // Before anything else creates a window, and before DpiScale reads the system
+        // DPI: an unaware process is told 96 no matter what the monitor does.
+        // SystemAware rather than PerMonitorV2 because the owner drawn parts of this UI
+        // (check boxes, radio buttons, thumbnail tiles) size their glyphs from one
+        // factor captured at startup. A second monitor with a different scaling factor
+        // is bitmap stretched by Windows, which is the accepted trade.
+        if (!Application.SetHighDpiMode(HighDpiMode.SystemAware))
+        {
+            _highDpiModeFailed = true;
+        }
+
         // The exception hooks come first: a crash before this point would be invisible.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += OnThreadException;
