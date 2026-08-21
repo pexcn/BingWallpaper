@@ -51,34 +51,37 @@ jobs:
       - name: Publish
         run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
 
-      # Temporary: what does the XAML runtime ask for, and what does the resource
-      # index actually contain? See the note in the commit that added this.
+      # Temporary: the XAML resources never reach the publish folder. This step
+      # collects the evidence needed to pick the fix - what the resource index
+      # holds, and what the MSIX tooling switch would produce instead.
       - name: Diagnose XAML resources
         shell: pwsh
         run: |
-          "### LoadComponent calls in the generated code"
-          Get-ChildItem src/BingWallpaper/obj -Recurse -Filter *.g.i.cs |
-            Select-String -Pattern "LoadComponent|ms-appx" |
-            ForEach-Object { $_.Line.Trim() } | Select-Object -Unique
-
-          "### .pri / .xbf in the build output"
-          Get-ChildItem src/BingWallpaper/bin -Recurse -File |
-            Where-Object { $_.Extension -in '.pri', '.xbf' } |
-            ForEach-Object { "{0,-90} {1,9:N0}" -f $_.FullName.Replace("$pwd\", ''), $_.Length }
+          $bin = "src/BingWallpaper/bin/Release/net10.0-windows10.0.19041.0/win-x64"
 
           "### .pri / .xbf in the publish output"
           Get-ChildItem publish -Recurse -File |
             Where-Object { $_.Extension -in '.pri', '.xbf' } |
             ForEach-Object { "{0,-60} {1,9:N0}" -f $_.Name, $_.Length }
 
-          "### resources.pri contents"
+          "### what is inside the app's own PRI"
           $makepri = Get-ChildItem "$env:USERPROFILE\.nuget\packages" -Recurse -Filter makepri.exe -ErrorAction SilentlyContinue |
             Select-Object -First 1
-          if (-not $makepri) { "makepri.exe not found" }
-          elseif (-not (Test-Path publish/resources.pri)) { "publish/resources.pri does not exist" }
-          else {
-            & $makepri.FullName dump /if publish/resources.pri /of pri-dump.xml /o | Out-Null
-            Get-Content pri-dump.xml | Select-Object -First 150
+          if (-not $makepri) {
+            "makepri.exe not found"
+          } else {
+            & $makepri.FullName dump /if "$bin/BingWallpaper.pri" /of pri-dump.xml /o | Out-Null
+            Get-Content pri-dump.xml | Select-String -Pattern "ResourceMapSubtree|<NamedResource|ResourceMap name|xbf" |
+              ForEach-Object { $_.Line.Trim() } | Select-Object -First 40
+          }
+
+          "### what EnableMsixTooling=true would publish"
+          dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish-msix -p:EnableMsixTooling=true 2>&1 |
+            Select-Object -Last 5
+          if (Test-Path publish-msix) {
+            Get-ChildItem publish-msix -Recurse -File |
+              Where-Object { $_.Extension -in '.pri', '.xbf' } |
+              ForEach-Object { "{0,-60} {1,9:N0}" -f $_.FullName.Replace("$pwd\publish-msix\", ''), $_.Length }
           }
 
       # The native PDB the AOT compiler emits is four times the size of the program
