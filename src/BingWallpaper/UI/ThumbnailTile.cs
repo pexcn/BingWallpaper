@@ -195,7 +195,7 @@ internal sealed class ThumbnailTile : Control
 
     private void PaintBadge(Graphics g, ThemePalette palette, Rectangle picture)
     {
-        string caption = _isPinned ? "已固定" : "当前";
+        string caption = _isPinned ? "已锁定" : "当前";
         Size text = TextRenderer.MeasureText(caption, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
         int padX = DpiScale.Round(6);
         int padY = DpiScale.Round(3);

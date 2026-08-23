@@ -256,7 +256,7 @@ internal sealed class HistoryForm : Form
         ThemeManager.ApplyToControl(_grid);
         UpdateCurrentMarker();
 
-        SetStatus("共 " + _images.Count + " 天，点击任意一张即可设为壁纸并固定。");
+        SetStatus("共 " + _images.Count + " 天，点击任意一张即可设为壁纸并锁定。");
         _ = LoadThumbnailsAsync(_thumbnailCts.Token);
     }
 
@@ -374,7 +374,7 @@ internal sealed class HistoryForm : Form
         try
         {
             await _context.ApplyFromHistoryAsync(index).ConfigureAwait(true);
-            SetStatus((_context.IsPinned ? "已固定：" : "已应用：") + image.DisplayLine);
+            SetStatus((_context.IsPinned ? "已锁定：" : "已应用：") + image.DisplayLine);
         }
         catch (Exception ex)
         {

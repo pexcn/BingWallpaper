@@ -61,11 +61,11 @@ internal sealed class TrayContext : ApplicationContext
         _titleItem = new MenuItem("正在获取今日壁纸…", (_, _) => OpenCopyrightLink()) { Enabled = false };
         _newerItem = new MenuItem("下一张", (_, _) => MoveBy(-1)) { Enabled = false };
         _olderItem = new MenuItem("上一张", (_, _) => MoveBy(1)) { Enabled = false };
-        _historyItem = new MenuItem("选择日期…", (_, _) => ShowHistory());
+        _historyItem = new MenuItem("选择日期...", (_, _) => ShowHistory());
         _refreshItem = new MenuItem("立即刷新", (_, _) => StartRefresh(userInitiated: true));
-        _pinItem = new MenuItem("固定当前壁纸", (_, _) => TogglePin()) { Enabled = false };
+        _pinItem = new MenuItem("锁定当前壁纸", (_, _) => TogglePin()) { Enabled = false };
         _folderItem = new MenuItem("打开壁纸目录", (_, _) => OpenWallpaperFolder());
-        _settingsItem = new MenuItem("设置…", (_, _) => ShowSettings());
+        _settingsItem = new MenuItem("设置...", (_, _) => ShowSettings());
         _exitItem = new MenuItem("退出", (_, _) => ExitApplication());
 
         // A native popup menu, the way every classic tray application builds one:
@@ -582,20 +582,22 @@ internal sealed class TrayContext : ApplicationContext
     private void UpdateMenuState()
     {
         bool pinned = _config.IsPinned;
-        string prefix = pinned ? "必应壁纸（已固定） · " : "必应壁纸 · ";
 
+        // The tooltip names the picture and nothing else: whether it is locked is
+        // what the menu is for, and repeating it here only eats into the 63
+        // characters the shell gives a tray tooltip.
         if (_appliedImage is not null)
         {
             _titleItem.Text = EscapeMnemonic(Truncate(_appliedImage.DisplayLine, 80));
-            _tray.Text = Truncate(prefix + _appliedImage.DisplayTitle, 63);
+            _tray.Text = Truncate("必应壁纸 · " + _appliedImage.DisplayTitle, 63);
         }
         else if (pinned && _appliedPath is not null)
         {
-            // Pinned long enough to have left the eight day window: the file name is
+            // Locked long enough to have left the eight day window: the file name is
             // all the metadata there is.
             string label = DescribeWallpaperFile(_config.PinnedWallpaper);
             _titleItem.Text = EscapeMnemonic(label);
-            _tray.Text = Truncate(prefix + label, 63);
+            _tray.Text = Truncate("必应壁纸 · " + label, 63);
         }
         else if (!_busy)
         {
