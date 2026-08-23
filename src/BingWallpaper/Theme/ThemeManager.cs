@@ -155,11 +155,11 @@ internal static class ThemeManager
                 break;
 
             case Button button:
-                // Every button in this UI is a ThemedButton: native in the light
-                // theme, painted from the palette in the dark one. The colours here
-                // only keep the control's own background from showing through during
-                // a resize. FlatStyle is left alone on purpose - that property is the
-                // switch the button uses to choose who paints it.
+                // Every button in this UI is a ThemedButton, which reads the palette
+                // while painting: the colours here only keep the control's own
+                // background from showing through during a resize, and the repaint is
+                // what actually applies the theme. Setting FlatStyle would fight the
+                // one the owner drawn button picked for itself.
                 button.BackColor = dark ? palette.ControlBackground : SystemColors.Control;
                 button.ForeColor = palette.Text;
                 button.Invalidate();

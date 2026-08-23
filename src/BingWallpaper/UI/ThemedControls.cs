@@ -367,7 +367,7 @@ internal sealed class ThemedCheckBox : CheckBox
 }
 
 /// <summary>
-/// Push button: native in the light theme, owner drawn in the dark one.
+/// Owner drawn push button, in both themes.
 /// <para>
 /// A plain Button does not centre its caption in itself: the WinForms button
 /// adapter derives a text rectangle from the border width, the focus rectangle and
@@ -379,11 +379,11 @@ internal sealed class ThemedCheckBox : CheckBox
 /// does, where the same font looks right - is the fix.
 /// </para>
 /// <para>
-/// That adapter only paints under FlatStyle.Standard and Flat. FlatStyle.System,
-/// which the light theme now uses, hands the button to the Win32 BUTTON class,
-/// and that one centres its caption itself - so the low caption should not come
-/// back with it. Worth a look on screen: it is the one thing about this switch
-/// that cannot be settled by reading code.
+/// FlatStyle.System was tried for the light theme and reverted. The native BUTTON
+/// class does centre its own caption, but its pressed state is the system's faint
+/// one - a slightly deeper grey - where this one goes to the selection colour.
+/// The dialog has a single button and it should answer a held mouse the same way
+/// in both themes.
 /// </para>
 /// </summary>
 internal sealed class ThemedButton : Button
@@ -393,26 +393,24 @@ internal sealed class ThemedButton : Button
 
     public ThemedButton()
     {
-        // No frame of its own while we paint: this keeps the base class from
-        // reserving room for one it will not draw. FlatStyle.System ignores it.
+        // Flat with no border of its own: everything below is painted by hand, and
+        // this keeps the base class from reserving room for a frame it will not draw.
+        FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
-        ApplyThemeStyle();
-        ThemeManager.ThemeChanged += OnThemeChanged;
+        SetStyle(
+            ControlStyles.UserPaint
+            | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw,
+            true);
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        if (!ThemeManager.IsDark)
-        {
-            // FlatStyle.System: the BUTTON window has already drawn itself.
-            base.OnPaint(e);
-            return;
-        }
-
         ThemePalette palette = ThemeManager.Palette;
         Graphics g = e.Graphics;
 
-        Color face = palette.ControlBackground;
+        Color face = palette.IsDark ? palette.ControlBackground : SystemColors.Control;
         Color caption = Enabled ? palette.Text : palette.SecondaryText;
 
         if (Enabled && _pressed)
@@ -574,45 +572,5 @@ internal sealed class ThemedButton : Button
         _pressed = false;
         Invalidate();
         base.OnLostFocus(e);
-    }
-
-    /// <summary>See <see cref="ThemedRadioButton"/>; the switch works the same way.</summary>
-    private void ApplyThemeStyle()
-    {
-        if (IsDisposed)
-        {
-            return;
-        }
-
-        bool dark = ThemeManager.IsDark;
-        FlatStyle = dark ? FlatStyle.Flat : FlatStyle.System;
-        SetStyle(
-            ControlStyles.AllPaintingInWmPaint
-            | ControlStyles.OptimizedDoubleBuffer
-            | ControlStyles.ResizeRedraw,
-            dark);
-        Invalidate();
-    }
-
-    private void OnThemeChanged(object? sender, EventArgs e)
-    {
-        if (IsHandleCreated)
-        {
-            BeginInvoke(new Action(ApplyThemeStyle));
-        }
-        else
-        {
-            ApplyThemeStyle();
-        }
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            ThemeManager.ThemeChanged -= OnThemeChanged;
-        }
-
-        base.Dispose(disposing);
     }
 }
