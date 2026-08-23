@@ -154,15 +154,17 @@ PinnedWallpaper=            ; 锁定的壁纸文件名，留空 = 跟随检查�
 需要 .NET SDK（用于 `dotnet` 命令）与 .NET Framework 4.8 目标包（Visual Studio 或 Build Tools 自带）：
 
 ```powershell
-dotnet build   src/BingWallpaper/BingWallpaper.csproj -c Release
-dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish
+dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish/BingWallpaper
 ```
 
-产物是单个 `publish\BingWallpaper.exe`，没有附带 DLL，也没有 `.exe.config`。
+产物是单个 `publish\BingWallpaper\BingWallpaper.exe`，没有附带 DLL，也没有 `.exe.config`。
 
-CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push / PR 时构建，
-并以 `-warnaserror` 保证零编译警告；打 `v*` 标签时把 exe 挂到 GitHub Release 上
-（可直接 `curl -LO` 的公开直链），同时保留 artifact 上传。
+CI（`.github/workflows/build.yml`，`windows-latest`）在每次 push 时构建，并以 `-warnaserror`
+保证零编译警告，产出上传为 artifact；打 `v*` 标签时另外把 `BingWallpaper.zip` 挂到 GitHub
+Release 上。两个下载解压后都是一个 `BingWallpaper` 文件夹，程序的配置、日志和壁纸都写在里面。
+
+版本号由 CI 从 git 决定：打标签的构建取标签名（`v1.2.0` → `1.2.0`），其余构建取
+`git describe`（如 `1.2.0-5-gabc1234`），因此开发构建能直接对应到具体提交。
 
 ## 技术说明
 
