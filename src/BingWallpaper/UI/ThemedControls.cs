@@ -425,9 +425,16 @@ internal sealed class ThemedButton : Button
             : palette.GlyphBorder;
 
         // No anti aliasing - see ThemedComboBox for what it does to a one pixel frame.
-        using (Pen pen = new(border, Math.Max(1, DpiScale.Round(1))))
+        // The path is inset by half the pen width instead of hugging the client edge: a
+        // pen is centred on the path, and DpiScale.Round(1) is two pixels from 150% up,
+        // so an edge hugging rectangle loses the outer half of its top and left strokes
+        // to clipping and keeps all of the bottom and right ones. That reads as a drop
+        // shadow rather than as a frame.
+        int stroke = Math.Max(1, DpiScale.Round(1));
+        using (Pen pen = new(border, stroke))
         {
-            g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+            int edge = stroke / 2;
+            g.DrawRectangle(pen, edge, edge, Width - stroke, Height - stroke);
         }
 
         TextRenderer.DrawText(

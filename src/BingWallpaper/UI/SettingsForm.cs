@@ -274,6 +274,13 @@ internal sealed class SettingsForm : Form
         _root.Controls.Add(buttons, 0, 2);
 
         Controls.Add(_root);
+
+        // Both roles go to the one button this dialog has - Enter and Esc should do the
+        // same thing here. AcceptButton also has to be set explicitly: without it the
+        // form promotes whatever IButtonControl currently holds the focus to default,
+        // and ThemedButton rings the default button in accent - so the ring would
+        // appear and vanish as the focus moved between the fields and the button.
+        AcceptButton = _closeButton;
         CancelButton = _closeButton;
     }
 
