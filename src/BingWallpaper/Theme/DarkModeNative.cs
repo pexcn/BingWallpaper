@@ -30,8 +30,8 @@ internal static class DarkModeNative
     /// <summary>PreferredAppMode.ForceDark</summary>
     private const int PreferredAppModeForceDark = 2;
 
-    /// <summary>PreferredAppMode.Default</summary>
-    private const int PreferredAppModeDefault = 0;
+    /// <summary>PreferredAppMode.ForceLight</summary>
+    private const int PreferredAppModeForceLight = 3;
 
     private static bool _appModeFailed;
 
@@ -65,7 +65,21 @@ internal static class DarkModeNative
     private static extern void RefreshImmersiveColorPolicyState();
 
     /// <summary>
+    /// uxtheme.dll ordinal #136, FlushMenuThemes(). Undocumented, 1903+. Drops the
+    /// cached menu theme so the next popup menu is drawn in the app mode set above;
+    /// without it a menu keeps the colours it was first opened with.
+    /// </summary>
+    [DllImport("uxtheme.dll", EntryPoint = "#136", SetLastError = true)]
+    private static extern void FlushMenuThemes();
+
+    /// <summary>
     /// Sets the process wide preferred app mode. Called once per theme switch.
+    /// <para>
+    /// This is what colours the tray menu: it is a native popup drawn by Windows, so
+    /// it follows the app mode rather than any managed palette. ForceLight rather
+    /// than Default for the light theme, because Default means "whatever the system
+    /// is set to" - which would hand a dark menu to a window painted light.
+    /// </para>
     /// </summary>
     public static void SetAppMode(bool dark)
     {
@@ -76,9 +90,10 @@ internal static class DarkModeNative
 
         try
         {
-            int mode = dark ? PreferredAppModeForceDark : PreferredAppModeDefault;
+            int mode = dark ? PreferredAppModeForceDark : PreferredAppModeForceLight;
             SetPreferredAppMode(mode);
             RefreshImmersiveColorPolicyState();
+            FlushMenuThemes();
             Logger.Debug("SetPreferredAppMode(" + mode + ") applied.");
         }
         catch (Exception ex)
