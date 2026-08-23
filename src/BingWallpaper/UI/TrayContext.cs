@@ -588,16 +588,20 @@ internal sealed class TrayContext : ApplicationContext
         // characters the shell gives a tray tooltip.
         if (_appliedImage is not null)
         {
-            _titleItem.Text = EscapeMnemonic(Truncate(_appliedImage.DisplayLine, 80));
+            string line = BracketDate(_appliedImage.DisplayDate, pinned) + " · " + _appliedImage.DisplayTitle;
+            _titleItem.Text = EscapeMnemonic(Truncate(line, 80));
             _tray.Text = Truncate("必应壁纸 · " + _appliedImage.DisplayTitle, 63);
         }
         else if (pinned && _appliedPath is not null)
         {
             // Locked long enough to have left the eight day window: the file name is
-            // all the metadata there is.
-            string label = DescribeWallpaperFile(_config.PinnedWallpaper);
-            _titleItem.Text = EscapeMnemonic(label);
-            _tray.Text = Truncate("必应壁纸 · " + label, 63);
+            // all the metadata there is. Described twice on purpose - the menu row
+            // brackets the date, the tooltip is the one place that stays silent
+            // about the lock.
+            _titleItem.Text = EscapeMnemonic(DescribeWallpaperFile(_config.PinnedWallpaper, locked: true));
+            _tray.Text = Truncate(
+                "必应壁纸 · " + DescribeWallpaperFile(_config.PinnedWallpaper, locked: false),
+                63);
         }
         else if (!_busy)
         {
@@ -776,15 +780,24 @@ internal sealed class TrayContext : ApplicationContext
     /// Menu caption for a picture whose metadata is out of reach: the file name
     /// still carries the date it was published on.
     /// </summary>
-    private static string DescribeWallpaperFile(string fileName)
+    private static string DescribeWallpaperFile(string fileName, bool locked)
     {
         if (BingImageInfo.TryParseFileName(fileName, out string startDate, out _))
         {
-            return BingImageInfo.FormatDate(startDate) + " 的壁纸";
+            return BracketDate(BingImageInfo.FormatDate(startDate), locked) + " 的壁纸";
         }
 
+        // No date to bracket: a name that did not parse is shown as it is, and the
+        // ticked menu row below is what says the wallpaper is locked.
         return Path.GetFileNameWithoutExtension(fileName);
     }
+
+    /// <summary>
+    /// Brackets the date of the title row while the wallpaper is locked. The state
+    /// belongs where the eye starts reading, and the ticked "锁定当前壁纸" row right
+    /// underneath is what the brackets refer to.
+    /// </summary>
+    private static string BracketDate(string date, bool locked) => locked ? "[" + date + "]" : date;
 
     /// <summary>
     /// Doubles the ampersands of a caption that comes from the outside. A single "&amp;"
