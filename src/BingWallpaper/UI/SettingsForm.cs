@@ -139,8 +139,7 @@ internal sealed class SettingsForm : Form
         // The window hands the focus to the first control in the tab order, which is
         // the market drop down. The close button takes it instead: a focused drop
         // down list answers the mouse wheel, so a stray scroll anywhere over the
-        // window would silently change a setting. How a focused drop down paints
-        // itself is ThemedComboBox's problem, not this one.
+        // window would silently change a setting.
         if (Visible)
         {
             ActiveControl = _closeButton;

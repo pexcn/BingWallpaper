@@ -121,108 +121,18 @@ internal sealed class ThemedRadioButton : RadioButton
 }
 
 /// <summary>
-/// Drop down list whose arrow button and focused value follow the palette.
+/// Drop down list, drawn by the system in both themes.
 ///
-/// ThemeManager switches every ComboBox to FlatStyle.Flat in the dark theme,
-/// because the themed control draws a light frame around its text. Flat in turn
-/// paints the arrow button as a light grey square with a black glyph, and no
-/// property recolours it. A ComboBox is a native window that ignores
-/// ControlStyles.UserPaint, so both the button and the value are painted over
-/// after the control has finished drawing itself.
+/// It used to be painted over in the dark theme: FlatStyle.Flat there (the themed
+/// control drew a light frame around its text), which in turn made the arrow
+/// button a light grey square, so button, value and frame were all redrawn after
+/// the native control had finished. That overlay is gone - the dark frame is left
+/// to SetWindowTheme("DarkMode_CFD") in ThemeManager plus the process wide
+/// ForceDark app mode, which is what Explorer itself relies on.
 /// </summary>
 internal sealed class ThemedComboBox : ComboBox
 {
-    /// <summary>WM_PAINT, winuser.h.</summary>
-    private const int WM_PAINT = 0x000F;
-
     public ThemedComboBox() => DropDownStyle = ComboBoxStyle.DropDownList;
-
-    protected override void WndProc(ref Message m)
-    {
-        base.WndProc(ref m);
-
-        if (m.Msg == WM_PAINT && ThemeManager.Palette.IsDark)
-        {
-            PaintOverlay();
-        }
-    }
-
-    protected override void OnGotFocus(EventArgs e)
-    {
-        // The value is painted differently with and without the focus, and the
-        // native control does not repaint the whole client area when it changes.
-        Invalidate();
-        base.OnGotFocus(e);
-    }
-
-    protected override void OnLostFocus(EventArgs e)
-    {
-        Invalidate();
-        base.OnLostFocus(e);
-    }
-
-    private void PaintOverlay()
-    {
-        ThemePalette palette = ThemeManager.Palette;
-        using Graphics g = Graphics.FromHwnd(Handle);
-
-        int buttonWidth = SystemInformation.VerticalScrollBarWidth;
-        Rectangle button = new(Width - buttonWidth - 1, 1, buttonWidth, Height - 2);
-        using (SolidBrush background = new(palette.ControlBackground))
-        {
-            g.FillRectangle(background, button);
-
-            // A DropDownList paints its value in the system highlight colours while
-            // it has the focus - a blue block behind white text, plus a dotted focus
-            // rectangle - and neither colour comes from the palette. The value is
-            // drawn again over the top; the focus shows as an accent border instead,
-            // which is also what the radio buttons and check boxes use.
-            if (Focused)
-            {
-                Rectangle text = new(1, 1, button.Left - 1, Height - 2);
-                g.FillRectangle(background, text);
-
-                // The inset the native control leaves in front of its text. NoPadding
-                // is what makes it the whole inset: TextRenderer adds a glyph overhang
-                // of its own otherwise, and the value would shift to the right by a
-                // few pixels every time the control took the focus.
-                text.Inflate(-DpiScale.Round(2), 0);
-                TextRenderer.DrawText(
-                    g,
-                    Text,
-                    Font,
-                    text,
-                    Enabled ? palette.Text : palette.SecondaryText,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                    TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
-                    TextFormatFlags.EndEllipsis);
-            }
-        }
-
-        // Before the chevron, and with no anti aliasing: an anti aliased one pixel
-        // rectangle only partly covers its corner pixels, and the flat border
-        // underneath is drawn in SystemColors.ControlDark, which stays light in the
-        // dark theme - so the corners came out as four bright dots.
-        using (Pen border = new(Focused ? palette.Accent : palette.Border))
-        {
-            g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
-        }
-
-        // A chevron, matching what the visual styles draw in the light palette.
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        int arm = DpiScale.Round(4);
-        int centreX = button.Left + (button.Width / 2);
-        int centreY = button.Top + (button.Height / 2) - (arm / 2);
-        using (Pen glyph = new(Enabled ? palette.Text : palette.SecondaryText, Math.Max(1, DpiScale.Round(1))))
-        {
-            g.DrawLines(glyph, new[]
-            {
-                new Point(centreX - arm, centreY),
-                new Point(centreX, centreY + arm),
-                new Point(centreX + arm, centreY),
-            });
-        }
-    }
 }
 
 /// <summary>
@@ -375,8 +285,7 @@ internal sealed class ThemedCheckBox : CheckBox
 /// the result visibly sits low in the button, and it cannot be corrected from the
 /// outside - button height and padding both change the box the text is centred in,
 /// so they move the button without moving the text inside it. Drawing the caption
-/// straight into the client rectangle - exactly what <see cref="ThemedComboBox"/>
-/// does, where the same font looks right - is the fix.
+/// straight into the client rectangle is the fix.
 /// </para>
 /// <para>
 /// FlatStyle.System was tried for the light theme and reverted. The native BUTTON
@@ -434,7 +343,8 @@ internal sealed class ThemedButton : Button
             : _hovered || _pressed || IsDefault ? palette.Accent
             : palette.GlyphBorder;
 
-        // No anti aliasing - see ThemedComboBox for what it does to a one pixel frame.
+        // No anti aliasing: it only partly covers the corner pixels of a one pixel
+        // rectangle, and four faint dots read as a smudge rather than as a frame.
         // The path is inset by half the pen width instead of hugging the client edge: a
         // pen is centred on the path, and DpiScale.Round(1) is two pixels from 150% up,
         // so an edge hugging rectangle loses the outer half of its top and left strokes
