@@ -199,13 +199,9 @@ internal static class ThemeManager
                 break;
 
             case ComboBox comboBox:
-                // Standard in both themes: that is the one that lets the visual
-                // styles draw the control. Flat was the dark theme's way of getting
-                // rid of a light frame, at the price of an arrow button that had to
-                // be painted over - see ThemedComboBox.
                 comboBox.BackColor = palette.ControlBackground;
                 comboBox.ForeColor = palette.Text;
-                comboBox.FlatStyle = FlatStyle.Standard;
+                comboBox.FlatStyle = dark ? FlatStyle.Flat : FlatStyle.Standard;
                 ApplyNativeTheme(comboBox, dark ? "DarkMode_CFD" : null);
                 break;
 

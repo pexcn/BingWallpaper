@@ -178,7 +178,7 @@ internal sealed class ThumbnailTile : Control
 
     private void PaintFrame(Graphics g, ThemePalette palette, Rectangle picture)
     {
-        // No anti aliasing on purpose - see ThemedButton for what it does to the
+        // No anti aliasing on purpose - see ThemedComboBox for what it does to the
         // corner pixels of a one pixel rectangle.
         Color colour = _isCurrent || _hovered ? palette.Accent : palette.Border;
         int width = _isCurrent ? Math.Max(2, DpiScale.Round(2)) : Math.Max(1, DpiScale.Round(1));
