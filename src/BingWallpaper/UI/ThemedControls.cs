@@ -154,10 +154,11 @@ internal sealed class ThemedComboBox : ComboBox
     /// </para>
     /// <para>
     /// So the device context is opened here and passed down through the wParam of
-    /// WM_PAINT. ComboBox honours a context given that way and paints into it
-    /// instead of opening one of its own; letting it call BeginPaint a second time
-    /// would hand it an update region this one has already validated, and everything
-    /// below would be clipped away.
+    /// WM_PAINT. ComboBox honours a context given that way - "useBeginPaint =
+    /// m.WParam == 0" in its own handler - and paints into it instead of opening one
+    /// of its own. It also reads the update region through GetUpdateRgn while doing
+    /// so, which is why the region goes back before the message is forwarded - see
+    /// the comment below.
     /// </para>
     /// </summary>
     protected override void WndProc(ref Message m)
@@ -188,7 +189,16 @@ internal sealed class ThemedComboBox : ComboBox
 
         try
         {
+            // BeginPaint validated the update region on the way out, and ComboBox needs
+            // it: its own WM_PAINT handler calls GetUpdateRgn to build the clip that
+            // keeps the drop down button out of what the native control paints. Given an
+            // empty update region that clip comes out empty too, and everything the
+            // control draws - the value text above all - is thrown away. So the region
+            // goes back before the message is forwarded, and is taken away again after:
+            // a window left invalid would ask to be painted for ever.
+            NativeMethods.InvalidateRect(Handle, ref paint.PaintRectangle, false);
             PaintInto(hdc);
+            NativeMethods.ValidateRect(Handle, IntPtr.Zero);
         }
         finally
         {

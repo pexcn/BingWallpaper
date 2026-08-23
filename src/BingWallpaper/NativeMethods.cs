@@ -29,21 +29,28 @@ internal static class NativeMethods
     /// </summary>
     public const int WS_EX_COMPOSITED = 0x02000000;
 
+    /// <summary>RECT, windef.h.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     /// <summary>
-    /// PAINTSTRUCT, winuser.h. Only the device context is ever read back, so the
-    /// reserved tail gets no fields of its own - Size pins the struct to the 72
-    /// bytes the window manager writes on x64, which is what this executable
-    /// targets (see PlatformTarget in the csproj).
+    /// PAINTSTRUCT, winuser.h. Only the device context and the paint rectangle are
+    /// ever read back, so the reserved tail gets no fields of its own - Size pins the
+    /// struct to the 72 bytes the window manager writes on x64, which is what this
+    /// executable targets (see PlatformTarget in the csproj).
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Size = 72)]
     public struct PAINTSTRUCT
     {
         public IntPtr Hdc;
         public int Erase;
-        public int PaintLeft;
-        public int PaintTop;
-        public int PaintRight;
-        public int PaintBottom;
+        public RECT PaintRectangle;
         public int Restore;
         public int IncUpdate;
     }
@@ -73,6 +80,22 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool RestoreDC(IntPtr hdc, int savedState);
+
+    /// <summary>
+    /// user32!InvalidateRect. Marks a rectangle of a window as needing to be painted.
+    /// Available since Windows 2000.
+    /// </summary>
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool InvalidateRect(IntPtr hWnd, ref RECT rect, [MarshalAs(UnmanagedType.Bool)] bool erase);
+
+    /// <summary>
+    /// user32!ValidateRect. A null rectangle validates the whole window. Available
+    /// since Windows 2000.
+    /// </summary>
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool ValidateRect(IntPtr hWnd, IntPtr rect);
 
     /// <summary>
     /// user32!SystemParametersInfoW. Available since Windows 2000.
