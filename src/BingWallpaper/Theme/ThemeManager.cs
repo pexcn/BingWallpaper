@@ -141,27 +141,6 @@ internal static class ThemeManager
         form.Invalidate(invalidateChildren: true);
     }
 
-    /// <summary>
-    /// Applies the palette to a window that is already on screen, in the order a
-    /// theme switch applies it: the process app mode is refreshed first, and only
-    /// then does each control get its window theme back.
-    /// <para>
-    /// A drop down themed before its window was revealed comes up with the theme
-    /// owning only part of its box: the frame and the arrow button are the theme's,
-    /// while the value rectangle is still filled by the control with the brush
-    /// WinForms answers WM_CTLCOLOREDIT with. That leaves a seam around the value,
-    /// and the value misses the hot state the rest of the box picks up. Switching the
-    /// theme by hand has always cleared it - the theme takes the whole box from then
-    /// on - and the only thing that switch does differently is that the window exists
-    /// while it runs. So it is run once more here, on open.
-    /// </para>
-    /// </summary>
-    public static void ApplyToShownForm(Form form)
-    {
-        DarkModeNative.SetAppMode(Palette.IsDark);
-        ApplyToForm(form);
-    }
-
     /// <summary>Recursively colours a control tree.</summary>
     public static void ApplyToControl(Control control)
     {
