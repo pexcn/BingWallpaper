@@ -90,6 +90,15 @@ internal sealed class HistoryForm : Form
     {
         base.OnLoad(e);
         FitToGrid();
+
+        // FitToGrid runs after the window has already been placed: StartPosition is
+        // resolved while the handle is created, against the size the form had then,
+        // which is the WinForms default of 300x300. Resizing afterwards holds the top
+        // left corner and grows towards the bottom right, so a grid this wide ends up
+        // centred on a window that no longer exists and hanging off the screen edge.
+        // Centre it again now that it is the size it will be shown at - still before
+        // the reveal, so nothing is seen moving.
+        CenterToScreen();
     }
 
     /// <summary>

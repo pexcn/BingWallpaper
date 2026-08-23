@@ -101,6 +101,11 @@ internal sealed class SettingsForm : Form
         base.OnLoad(e);
         SizeDropDowns();
         FitToContent();
+
+        // Same reason as HistoryForm: StartPosition was resolved against the default
+        // form size while the handle was created, and FitToContent has moved the
+        // bottom right corner since. Centre it again on the size it will be shown at.
+        CenterToScreen();
     }
 
     protected override void OnVisibleChanged(EventArgs e)
