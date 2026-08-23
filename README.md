@@ -1,23 +1,31 @@
-# BingWallpaper
+# 必应壁纸
 
 一个干净、便携、开源的 Bing 每日壁纸客户端（Windows / 单文件 / 托盘常驻）。
 
-> 截图占位：`docs/screenshot-dark.png`（深色模式下的设置界面与托盘菜单）。
-> 首个构建产物在真机运行后补充。
+## 截图
+
+<!-- 图片就位后把对应格子换成 ![说明](docs/xxx.png) 即可 -->
+
+|  |  |
+| :---: | :---: |
+| **设置 · 深色**<br>`docs/settings-dark.png` | **设置 · 浅色**<br>`docs/settings-light.png` |
+| **历史壁纸**<br>`docs/history.png` | **托盘菜单**<br>`docs/tray.png` |
+
+> 截图待补：首个构建产物在真机运行后补上。
 
 ---
 
 ## 特性
 
 - 常驻托盘，无主窗口，默认每小时检查一次今日壁纸
-- 4K（`_UHD.jpg`）/ 1080p（`_1920x1080.jpg`）分辨率由客户端自己决定，不受接口返回值影响
-- 支持 14 个常见市场（设置界面为只读下拉框；INI 里可手填任意市场代码，程序会把它补进列表）
+- 4K / 1080p 分辨率由客户端自己决定，不受接口返回值影响
+- 支持 14 个常见市场，也可在 INI 里手填任意市场代码
 - 最近 8 天历史壁纸缩略图网格，一键切换；托盘菜单可直接上一张 / 下一张
 - 可锁定某一张壁纸，不再随检查间隔自动更换，重启后依旧保持
 - 六种填充方式：填充 / 适应 / 拉伸 / 平铺 / 居中 / 跨区
-- 手写深色模式，**在 Windows 10 上同样有效**（不依赖仅 Windows 11 可用的 `Application.SetColorMode`），可跟随系统实时切换
+- 手写深色模式，**在 Windows 10 上同样有效**，可跟随系统实时切换
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹 = 完整卸载
-- 零第三方依赖（仅 BCL + P/Invoke），**单个几百 KB 的 exe，无需安装任何运行时**
+- 零第三方依赖，**单个几百 KB 的 exe，无需安装任何运行时**
 
 ## 系统要求
 
@@ -30,23 +38,6 @@
 2. 把这个文件夹放到一个**有写入权限**的位置（例如 `D:\Tools\`，或 U 盘）
    - 放在 `C:\Program Files` 之类不可写的位置时，程序会明确报错退出，不会偷偷改写 `%APPDATA%`
 3. 双击文件夹里的 `BingWallpaper.exe`，托盘出现图标后即开始工作
-
-### 为什么用 .NET Framework 4.8 而不是 .NET 10？
-
-因为要做到「体积小 **且** 免安装」，在 Windows 上只有这一条路：
-
-| 方案 | 体积 | 是否需要安装运行时 |
-|---|---|---|
-| .NET Framework 4.8（本项目） | ~200 KB | **否**，Windows 10 1903+ 内置 |
-| .NET 10，依赖框架 | ~280 KB | 是，需装 .NET 10 Desktop Runtime |
-| .NET 10，自包含单文件 | ~47 MB | 否 |
-
-.NET 5 及以后（.NET Core 血统）**没有任何版本内置于 Windows**，所以「把 .NET 10 降到 .NET 8」并不能免安装。
-能免安装的最高版本就是 .NET Framework 4.8——4.8.1 只在 Windows 11 22H2+ 内置，Win10 上仍需手动安装。
-体积小的开源 Windows 工具（例如 shadowsocks-windows 4.x）走的也是同一条路。
-
-代价是 .NET Framework 不再演进，且缺少一些现代 API；本项目相应地自己实现了 JSON 解析之外的
-兼容处理（见「技术说明」）。
 
 托盘右键菜单：
 
@@ -65,21 +56,6 @@
 ```
 
 锁定期间第一行的日期会带上中括号（`[2026-08-23] · 图片标题`），解除锁定即恢复。
-
-### 目录布局
-
-```
-<程序目录>\
-├─ BingWallpaper.exe
-├─ BingWallpaper.ini        # 配置，纯文本可手改
-├─ BingWallpaper.log        # 日志（512KB 轮转，保留一个 BingWallpaper.log.1）
-└─ wallpapers\
-   └─ 20260818_WhyteCliffP_UHD.jpg
-```
-
-壁纸文件名是 `<日期>_<图片标识>_<分辨率>.jpg`，其中图片标识取自接口返回的 `OHR.` 标记，
-**跨市场相同**——同一张照片同时下发到 de-DE / en-IN / fr-FR 时，本地只会存一份，
-切换市场时命中已有文件就完全不联网下载。
 
 ### 配置文件
 
@@ -114,38 +90,6 @@ PinnedWallpaper=            ; 锁定的壁纸文件名，留空 = 跟随检查�
 | 卸载残留 | 有 | 删除文件夹即彻底卸载 |
 
 本程序只做一件事：把 Bing 每日图片下载下来，设为壁纸。
-
----
-
-## What this program touches（本程序改动了什么）
-
-透明是这个项目的底线，所以逐条列清楚。
-
-### 本程序自己写入的位置
-
-| 位置 | 何时写入 | 说明 |
-|---|---|---|
-| `<程序目录>\BingWallpaper.ini` | 首次启动、修改设置时 | 配置文件 |
-| `<程序目录>\BingWallpaper.log(.1)` | 运行期间 | 日志，512KB 轮转 |
-| `<程序目录>\wallpapers\*.jpg` | 下载壁纸时 | 按保留天数自动清理；当前使用中的文件和已锁定的文件永不删除 |
-| `HKCU\Control Panel\Desktop` 的 `WallpaperStyle` / `TileWallpaper` | 每次设置壁纸 | **设置壁纸的必要条件**：必须先写这两个值再调用 `SystemParametersInfoW`，否则填充方式不生效 |
-| `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 的 `BingWallpaper` | **仅当你在设置里打开「开机自动启动」** | 值为加引号的 exe 绝对路径。程序移动位置后，下次启动会自动修正该值；关闭开关时会删除该值 |
-
-除此之外，本程序不写入 `%APPDATA%`、`%LOCALAPPDATA%`、「我的图片」或任何程序目录之外的位置。
-
-### Windows 自己写入的位置（不是本程序所为）
-
-只要**任何**程序（包括系统「个性化」面板）设置了壁纸，Windows 就会自行写入以下位置：
-
-| 位置 | 说明 | 如何清理 |
-|---|---|---|
-| `HKCU\Control Panel\Desktop` 的 `Wallpaper` | 当前壁纸路径，由 `SystemParametersInfoW` 写入 | 通过系统「个性化 → 背景」重新选择壁纸即可覆盖 |
-| `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers` 的 `BackgroundHistoryPath0..4` | 最近 5 张壁纸的历史记录 | 可手动删除这些值 |
-| `%APPDATA%\Microsoft\Windows\Themes\TranscodedWallpaper` | Windows 转码后的壁纸副本 | 可手动删除，系统会在下次换壁纸时重建 |
-| `%APPDATA%\Microsoft\Windows\Themes\CachedFiles\` | 壁纸缓存 | 同上 |
-
-要彻底清理：在设置界面**取消勾选「开机自动启动」**（这会删除 Run 键下的 `BingWallpaper` 值），然后删除整个程序目录。
-上面列出的由 Windows 自行写入的位置，本程序无法安全移除，需按表中说明手动处理。
 
 ---
 
@@ -196,14 +140,6 @@ Release 上。两个下载解压后都是一个 `BingWallpaper` 文件夹，程�
   都是强调色蓝
 - 全球化功能保持启用：曾经开启的 `InvariantGlobalization`（.NET 10 时期）会让 WinForms 在切换输入法
   （`WM_INPUTLANGCHANGE` → `CultureInfo.GetCultureInfo(lcid)`）时直接崩溃
-
-## 免责声明
-
-- 本项目为**非官方**项目，与 Bing 及 Microsoft 没有任何关联、认可或合作关系。
-- "Bing"、"Microsoft"、"Windows" 是 Microsoft Corporation 的商标。微软另有一款同名官方产品 Bing Wallpaper，
-  与本项目无关，请勿混淆。
-- Bing 每日图片的版权归原作者 / 版权方所有，Bing 仅授权其用作个人桌面壁纸。请勿将下载到的图片用于其他用途。
-- 本软件按「现状」提供，不作任何担保，使用风险自负。
 
 ## 许可证
 
