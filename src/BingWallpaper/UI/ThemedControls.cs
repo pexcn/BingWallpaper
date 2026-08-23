@@ -256,7 +256,7 @@ internal sealed class ThemedComboBox : ComboBox
         {
             int buttonWidth = SystemInformation.VerticalScrollBarWidth;
             Rectangle text = new(1, 1, Width - buttonWidth - 2, Height - 2);
-            using (SolidBrush background = new(palette.ControlBackground))
+            using (SolidBrush background = new(palette.DropDownBackground))
             {
                 g.FillRectangle(background, text);
             }

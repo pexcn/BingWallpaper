@@ -13,6 +13,7 @@ internal sealed class ThemePalette
         bool isDark,
         Color windowBackground,
         Color controlBackground,
+        Color dropDownBackground,
         Color border,
         Color text,
         Color secondaryText,
@@ -27,6 +28,7 @@ internal sealed class ThemePalette
         IsDark = isDark;
         WindowBackground = windowBackground;
         ControlBackground = controlBackground;
+        DropDownBackground = dropDownBackground;
         Border = border;
         Text = text;
         SecondaryText = secondaryText;
@@ -44,6 +46,16 @@ internal sealed class ThemePalette
     public Color WindowBackground { get; }
 
     public Color ControlBackground { get; }
+
+    /// <summary>
+    /// Fill of a drop down list, which is not ControlBackground because the box is
+    /// filled by two hands at once: DarkMode_CFD paints the frame and the arrow
+    /// button, while the control fills the value rectangle itself, with the brush
+    /// WinForms answers WM_CTLCOLOREDIT with - that is, with BackColor. Any colour but
+    /// the theme's own leaves a seam around the value, so this is the theme's own,
+    /// read off the control with a colour picker.
+    /// </summary>
+    public Color DropDownBackground { get; }
 
     public Color Border { get; }
 
@@ -73,6 +85,7 @@ internal sealed class ThemePalette
         isDark: false,
         windowBackground: SystemColors.Control,
         controlBackground: SystemColors.Window,
+        dropDownBackground: SystemColors.Window,
         border: SystemColors.ControlDark,
         text: SystemColors.ControlText,
         secondaryText: SystemColors.GrayText,
@@ -88,6 +101,7 @@ internal sealed class ThemePalette
         isDark: true,
         windowBackground: Color.FromArgb(0x20, 0x20, 0x20),
         controlBackground: Color.FromArgb(0x2D, 0x2D, 0x2D),
+        dropDownBackground: Color.FromArgb(0x33, 0x33, 0x33),
         border: Color.FromArgb(0x3F, 0x3F, 0x46),
         text: Color.FromArgb(0xFF, 0xFF, 0xFF),
         secondaryText: Color.FromArgb(0xC0, 0xC0, 0xC0),

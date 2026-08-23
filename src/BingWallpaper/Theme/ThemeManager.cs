@@ -203,7 +203,12 @@ internal static class ThemeManager
                 // painting to the control itself. Flat pulls the WinForms flat adapter
                 // into the paint cycle, which costs more than the light frame it was
                 // there to remove - see ThemedComboBox.
-                comboBox.BackColor = palette.ControlBackground;
+                //
+                // BackColor is what WinForms answers WM_CTLCOLOREDIT with, and the
+                // control fills the value rectangle with it while the theme fills
+                // everything around it. DropDownBackground is the theme's own colour,
+                // so the two agree and the box comes out in one piece.
+                comboBox.BackColor = palette.DropDownBackground;
                 comboBox.ForeColor = palette.Text;
                 comboBox.FlatStyle = FlatStyle.Standard;
                 ApplyNativeTheme(comboBox, dark ? "DarkMode_CFD" : null);
