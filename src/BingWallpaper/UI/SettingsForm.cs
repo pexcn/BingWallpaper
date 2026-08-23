@@ -147,6 +147,17 @@ internal sealed class SettingsForm : Form
         }
     }
 
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+
+        // The pass in OnLoad does reach the children, but it runs before the window is
+        // revealed, and a drop down themed while its window is hidden keeps filling
+        // its own value rectangle - see ThemeManager.ApplyToShownForm. This is the
+        // first point where the window is actually on screen.
+        ThemeManager.ApplyToShownForm(this);
+    }
+
     /// <summary>
     /// Gives every drop down the width of the longest entry any of them holds, so
     /// they line up on both edges while staying as narrow as their content.
