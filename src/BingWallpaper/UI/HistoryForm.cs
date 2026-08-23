@@ -62,7 +62,6 @@ internal sealed class HistoryForm : Form
         _grid.WrapContents = true;
         _grid.FlowDirection = FlowDirection.LeftToRight;
         _grid.Padding = new Padding(8);
-        _grid.MouseLeave += OnGridMouseLeave;
 
         _statusSeparator.Dock = DockStyle.Bottom;
 
@@ -294,27 +293,7 @@ internal sealed class HistoryForm : Form
         }
     }
 
-    private void OnTileMouseLeave(object? sender, EventArgs e) => RestoreStatus();
-
-    /// <summary>
-    /// The pointer can also leave the window from the gap between two tiles, where
-    /// there is no tile left to report it.
-    /// </summary>
-    private void OnGridMouseLeave(object? sender, EventArgs e) => RestoreStatus();
-
-    /// <summary>
-    /// Puts the standing line back - but only once the pointer has really left the
-    /// grid. The tiles sit eight pixels apart, so sweeping from one picture to the
-    /// next leaves a tile before it enters the following one, and restoring on that
-    /// blinked the line back to the default between every pair.
-    /// </summary>
-    private void RestoreStatus()
-    {
-        if (!_grid.ClientRectangle.Contains(_grid.PointToClient(Cursor.Position)))
-        {
-            _status.Text = _statusText;
-        }
-    }
+    private void OnTileMouseLeave(object? sender, EventArgs e) => _status.Text = _statusText;
 
     private async Task LoadThumbnailsAsync(CancellationToken cancellationToken)
     {
