@@ -2,11 +2,6 @@ name: build
 
 on:
   push:
-    branches:
-      - '**'
-    tags:
-      - 'v*'
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -25,35 +20,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Resolve version
-        id: version
-        shell: pwsh
-        run: |
-          $version = '1.0.0'
-          if ($env:GITHUB_REF -like 'refs/tags/v*') {
-            $version = $env:GITHUB_REF.Substring('refs/tags/v'.Length)
-          }
-          Write-Host "Version: $version"
-          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Restore
-        run: dotnet restore src/BingWallpaper/BingWallpaper.csproj
-
-      # -warnaserror keeps the "no compiler warnings" rule enforced instead of
-      # merely observed. Drop the flag if a future SDK introduces new warnings.
-      - name: Build
-        run: dotnet build src/BingWallpaper/BingWallpaper.csproj -c Release --no-restore -warnaserror -p:Version=${{ steps.version.outputs.value }}
-
       # .NET Framework 4.8 ships with Windows 10 1903+, so the published output is
       # just the executable - no runtime to bundle, nothing to install.
+      # -warnaserror keeps the "no compiler warnings" rule enforced instead of
+      # merely observed. Drop the flag if a future SDK introduces new warnings.
       - name: Publish
-        run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.value }}
-
-      - name: Report published files
-        shell: pwsh
-        run: |
-          Get-ChildItem publish -Recurse |
-            ForEach-Object { "{0,-30} {1,10:N0} bytes" -f $_.Name, $_.Length }
+        run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -warnaserror
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -67,11 +39,3 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: publish/BingWallpaper.exe
-          generate_release_notes: true
-          body: |
-            BingWallpaper ${{ steps.version.outputs.value }}
-
-            单个 exe，几百 KB，**无需安装任何运行时**：使用 .NET Framework 4.8，
-            它随 Windows 10 1903 及以上版本（含 LTSC 2021）内置。
-
-            放到一个有写入权限的目录后直接运行即可，配置、日志与壁纸都保存在程序所在目录。
