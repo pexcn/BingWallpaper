@@ -166,12 +166,10 @@ internal static class ThemeManager
                 break;
 
             case CheckBox or RadioButton:
-                // BackColor matters in both themes: it is the brush WinForms hands
-                // back for WM_CTLCOLORSTATIC, which is what the native glyph paints
-                // itself against in the light theme, and what the owner drawn one
-                // clears to in the dark theme.
                 control.BackColor = palette.WindowBackground;
                 control.ForeColor = palette.Text;
+
+                // The owner drawn check/radio glyphs read the palette while painting.
                 control.Invalidate();
                 break;
 
