@@ -23,6 +23,13 @@ internal static class NativeMethods
     public const int WM_SETTINGCHANGE = 0x001A;
 
     /// <summary>
+    /// WS_EX_COMPOSITED - compose the window and its children off screen and put the
+    /// result up in one piece, instead of revealing the window and letting the
+    /// children paint themselves into it afterwards.
+    /// </summary>
+    public const int WS_EX_COMPOSITED = 0x02000000;
+
+    /// <summary>
     /// user32!SystemParametersInfoW. Available since Windows 2000.
     /// </summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

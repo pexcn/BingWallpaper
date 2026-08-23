@@ -90,6 +90,24 @@ internal sealed class SettingsForm : Form
 
     public event EventHandler<SettingsChangedEventArgs>? SettingsChanged;
 
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams cp = base.CreateParams;
+
+            // Without this the window is revealed first and its children paint into it
+            // afterwards, one handle at a time. On a machine slow enough for that gap
+            // to span a compositor frame the window is on screen before the palette
+            // reaches it, and the dark dialog is seen assembling itself out of the
+            // system's light default. Composing off screen and putting the result up
+            // in one piece costs a buffer and a slower repaint, neither of which a
+            // fixed dialog this size notices.
+            cp.ExStyle |= NativeMethods.WS_EX_COMPOSITED;
+            return cp;
+        }
+    }
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
@@ -101,6 +119,12 @@ internal sealed class SettingsForm : Form
         base.OnLoad(e);
         SizeDropDowns();
         FitToContent();
+
+        // The child handles do not exist until now - Control.CreateControl builds the
+        // form's handle, fires OnHandleCreated, and only then creates the children, so
+        // the pass above ran too early to reach them. This is the first point where
+        // SetWindowTheme has something to talk to, and it is still before the reveal.
+        ThemeManager.ApplyToForm(this);
 
         // Same reason as HistoryForm: StartPosition was resolved against the default
         // form size while the handle was created, and FitToContent has moved the
