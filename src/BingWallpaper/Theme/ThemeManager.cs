@@ -155,21 +155,23 @@ internal static class ThemeManager
                 break;
 
             case Button button:
-                // Every button in this UI is a ThemedButton, which reads the palette
-                // while painting: the colours here only keep the control's own
-                // background from showing through during a resize, and the repaint is
-                // what actually applies the theme. Setting FlatStyle would fight the
-                // one the owner drawn button picked for itself.
+                // Every button in this UI is a ThemedButton: native in the light
+                // theme, painted from the palette in the dark one. The colours here
+                // only keep the control's own background from showing through during
+                // a resize. FlatStyle is left alone on purpose - that property is the
+                // switch the button uses to choose who paints it.
                 button.BackColor = dark ? palette.ControlBackground : SystemColors.Control;
                 button.ForeColor = palette.Text;
                 button.Invalidate();
                 break;
 
             case CheckBox or RadioButton:
+                // BackColor matters in both themes: it is the brush WinForms hands
+                // back for WM_CTLCOLORSTATIC, which is what the native glyph paints
+                // itself against in the light theme, and what the owner drawn one
+                // clears to in the dark theme.
                 control.BackColor = palette.WindowBackground;
                 control.ForeColor = palette.Text;
-
-                // The owner drawn check/radio glyphs read the palette while painting.
                 control.Invalidate();
                 break;
 

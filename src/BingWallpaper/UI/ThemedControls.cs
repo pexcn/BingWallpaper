@@ -7,12 +7,13 @@ using BingWallpaper.Theme;
 namespace BingWallpaper.UI;
 
 /// <summary>
-/// Owner drawn radio button.
+/// Radio button that is native in the light theme and owner drawn in the dark one.
 ///
-/// The stock WinForms glyph is painted by the system theme against the control
-/// background: on a dark background the result is a black circle with a black
-/// dot, which is what the light/dark themed dialog looked like. Drawing the
-/// glyph ourselves keeps the checked state accent blue in both themes.
+/// The stock glyph is painted by the system theme against the control background:
+/// on a dark background that comes out as a black circle with a black dot, and no
+/// property recolours it - hence the hand drawn glyph there. The light theme has
+/// nothing to fix, so the control is handed back to the Win32 BUTTON class and
+/// keeps the system glyph, metrics and hover animation.
 /// </summary>
 internal sealed class ThemedRadioButton : RadioButton
 {
@@ -21,14 +22,9 @@ internal sealed class ThemedRadioButton : RadioButton
     public ThemedRadioButton(string text)
     {
         Text = text;
-        FlatStyle = FlatStyle.Flat;
         AutoSize = true;
-        SetStyle(
-            ControlStyles.UserPaint
-            | ControlStyles.AllPaintingInWmPaint
-            | ControlStyles.OptimizedDoubleBuffer
-            | ControlStyles.ResizeRedraw,
-            true);
+        ApplyThemeStyle();
+        ThemeManager.ThemeChanged += OnThemeChanged;
     }
 
     private static int GlyphSize => DpiScale.Round(15);
@@ -37,6 +33,12 @@ internal sealed class ThemedRadioButton : RadioButton
 
     public override Size GetPreferredSize(Size proposedSize)
     {
+        if (!ThemeManager.IsDark)
+        {
+            // The system knows how much room its own glyph and spacing need.
+            return base.GetPreferredSize(proposedSize);
+        }
+
         Size text = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
         int height = Math.Max(GlyphSize, text.Height) + DpiScale.Round(6);
         return new Size(GlyphSize + Gap + text.Width + DpiScale.Round(4), height);
@@ -44,6 +46,13 @@ internal sealed class ThemedRadioButton : RadioButton
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        if (!ThemeManager.IsDark)
+        {
+            // FlatStyle.System: the BUTTON window has already drawn itself.
+            base.OnPaint(e);
+            return;
+        }
+
         ThemePalette palette = ThemeManager.Palette;
         Graphics g = e.Graphics;
         g.Clear(BackColor);
@@ -111,6 +120,57 @@ internal sealed class ThemedRadioButton : RadioButton
     {
         Invalidate();
         base.OnEnabledChanged(e);
+    }
+
+    /// <summary>
+    /// Picks who paints this control. FlatStyle is the switch: anything other than
+    /// System makes ButtonBase turn on ControlStyles.UserPaint and recreate the
+    /// handle, which is what routes the painting through OnPaint above. The extra
+    /// styles only matter while we are the ones painting.
+    /// </summary>
+    private void ApplyThemeStyle()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        bool dark = ThemeManager.IsDark;
+        FlatStyle = dark ? FlatStyle.Flat : FlatStyle.System;
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw,
+            dark);
+        Invalidate();
+    }
+
+    /// <summary>
+    /// The theme can change from inside a click on this very control - the settings
+    /// dialog switches it from a radio button of its own. Recreating the handle in
+    /// the middle of that message is asking for trouble, so the switch waits for the
+    /// message loop to come back around.
+    /// </summary>
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        if (IsHandleCreated)
+        {
+            BeginInvoke(new Action(ApplyThemeStyle));
+        }
+        else
+        {
+            ApplyThemeStyle();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            ThemeManager.ThemeChanged -= OnThemeChanged;
+        }
+
+        base.Dispose(disposing);
     }
 }
 
@@ -245,7 +305,10 @@ internal sealed class ThemedSeparator : Control
     }
 }
 
-/// <summary>Owner drawn check box, same reasoning as <see cref="ThemedRadioButton"/>.</summary>
+/// <summary>
+/// Check box, same reasoning as <see cref="ThemedRadioButton"/>: native while the
+/// light theme is on, owner drawn once nothing native follows the palette.
+/// </summary>
 internal sealed class ThemedCheckBox : CheckBox
 {
     private bool _hovered;
@@ -253,14 +316,9 @@ internal sealed class ThemedCheckBox : CheckBox
     public ThemedCheckBox(string text)
     {
         Text = text;
-        FlatStyle = FlatStyle.Flat;
         AutoSize = true;
-        SetStyle(
-            ControlStyles.UserPaint
-            | ControlStyles.AllPaintingInWmPaint
-            | ControlStyles.OptimizedDoubleBuffer
-            | ControlStyles.ResizeRedraw,
-            true);
+        ApplyThemeStyle();
+        ThemeManager.ThemeChanged += OnThemeChanged;
     }
 
     private static int GlyphSize => DpiScale.Round(15);
@@ -269,6 +327,11 @@ internal sealed class ThemedCheckBox : CheckBox
 
     public override Size GetPreferredSize(Size proposedSize)
     {
+        if (!ThemeManager.IsDark)
+        {
+            return base.GetPreferredSize(proposedSize);
+        }
+
         if (Text.Length == 0)
         {
             // Caption-less: a row label describes the box, so the glyph is all there is.
@@ -282,6 +345,13 @@ internal sealed class ThemedCheckBox : CheckBox
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        if (!ThemeManager.IsDark)
+        {
+            // FlatStyle.System: the BUTTON window has already drawn itself.
+            base.OnPaint(e);
+            return;
+        }
+
         ThemePalette palette = ThemeManager.Palette;
         Graphics g = e.Graphics;
         g.Clear(BackColor);
@@ -358,22 +428,66 @@ internal sealed class ThemedCheckBox : CheckBox
         Invalidate();
         base.OnEnabledChanged(e);
     }
+
+    /// <summary>See <see cref="ThemedRadioButton"/>; the switch works the same way.</summary>
+    private void ApplyThemeStyle()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        bool dark = ThemeManager.IsDark;
+        FlatStyle = dark ? FlatStyle.Flat : FlatStyle.System;
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw,
+            dark);
+        Invalidate();
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        if (IsHandleCreated)
+        {
+            BeginInvoke(new Action(ApplyThemeStyle));
+        }
+        else
+        {
+            ApplyThemeStyle();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            ThemeManager.ThemeChanged -= OnThemeChanged;
+        }
+
+        base.Dispose(disposing);
+    }
 }
 
 /// <summary>
-/// Owner drawn push button.
+/// Push button: native in the light theme, owner drawn in the dark one.
 /// <para>
 /// A plain Button does not centre its caption in itself: the WinForms button
 /// adapter derives a text rectangle from the border width, the focus rectangle and
 /// the padding, and centres the caption in <em>that</em>. With the Chinese UI font
 /// the result visibly sits low in the button, and it cannot be corrected from the
 /// outside - button height and padding both change the box the text is centred in,
-/// so they move the button without moving the text inside it.
+/// so they move the button without moving the text inside it. Drawing the caption
+/// straight into the client rectangle - exactly what <see cref="ThemedComboBox"/>
+/// does, where the same font looks right - is the fix.
 /// </para>
 /// <para>
-/// Drawing the caption straight into the client rectangle - exactly what
-/// <see cref="ThemedComboBox"/> does, where the same font looks right - is the fix.
-/// It also brings the last system drawn control in this UI under the palette.
+/// That adapter only paints under FlatStyle.Standard and Flat. FlatStyle.System,
+/// which the light theme now uses, hands the button to the Win32 BUTTON class,
+/// and that one centres its caption itself - so the low caption should not come
+/// back with it. Worth a look on screen: it is the one thing about this switch
+/// that cannot be settled by reading code.
 /// </para>
 /// </summary>
 internal sealed class ThemedButton : Button
@@ -383,24 +497,26 @@ internal sealed class ThemedButton : Button
 
     public ThemedButton()
     {
-        // Flat with no border of its own: everything below is painted by hand, and
-        // this keeps the base class from reserving room for a frame it will not draw.
-        FlatStyle = FlatStyle.Flat;
+        // No frame of its own while we paint: this keeps the base class from
+        // reserving room for one it will not draw. FlatStyle.System ignores it.
         FlatAppearance.BorderSize = 0;
-        SetStyle(
-            ControlStyles.UserPaint
-            | ControlStyles.AllPaintingInWmPaint
-            | ControlStyles.OptimizedDoubleBuffer
-            | ControlStyles.ResizeRedraw,
-            true);
+        ApplyThemeStyle();
+        ThemeManager.ThemeChanged += OnThemeChanged;
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        if (!ThemeManager.IsDark)
+        {
+            // FlatStyle.System: the BUTTON window has already drawn itself.
+            base.OnPaint(e);
+            return;
+        }
+
         ThemePalette palette = ThemeManager.Palette;
         Graphics g = e.Graphics;
 
-        Color face = palette.IsDark ? palette.ControlBackground : SystemColors.Control;
+        Color face = palette.ControlBackground;
         Color caption = Enabled ? palette.Text : palette.SecondaryText;
 
         if (Enabled && _pressed)
@@ -562,5 +678,45 @@ internal sealed class ThemedButton : Button
         _pressed = false;
         Invalidate();
         base.OnLostFocus(e);
+    }
+
+    /// <summary>See <see cref="ThemedRadioButton"/>; the switch works the same way.</summary>
+    private void ApplyThemeStyle()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        bool dark = ThemeManager.IsDark;
+        FlatStyle = dark ? FlatStyle.Flat : FlatStyle.System;
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw,
+            dark);
+        Invalidate();
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        if (IsHandleCreated)
+        {
+            BeginInvoke(new Action(ApplyThemeStyle));
+        }
+        else
+        {
+            ApplyThemeStyle();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            ThemeManager.ThemeChanged -= OnThemeChanged;
+        }
+
+        base.Dispose(disposing);
     }
 }
