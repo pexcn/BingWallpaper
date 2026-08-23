@@ -20,6 +20,7 @@
     <!-- No NuGet packages, so no binding redirects and no .exe.config are needed. -->
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
+    <GenerateSupportedRuntime>false</GenerateSupportedRuntime>
     <DebugType>none</DebugType>
   </PropertyGroup>
 
@@ -30,7 +31,7 @@
     <Product>必应壁纸</Product>
     <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
     <Copyright>Copyright © 2026 pexcn · GPL-3.0-or-later</Copyright>
-    <Version>1.0.0</Version>
+    <Version>0.0.0</Version>
     <NeutralLanguage>en-US</NeutralLanguage>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>

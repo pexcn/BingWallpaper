@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -25,7 +27,16 @@ jobs:
       # -warnaserror keeps the "no compiler warnings" rule enforced instead of
       # merely observed. Drop the flag if a future SDK introduces new warnings.
       - name: Publish
-        run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish/BingWallpaper -warnaserror
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME -replace '^v', ''
+          } else {
+            $describe = & { $ErrorActionPreference = 'Continue'; git describe --tags --long 2>$null }
+            if ($describe) { $describe -replace '^v', '' } else { '0.0.0-0-g' + (git rev-parse --short HEAD) }
+          }
+          Write-Host "Version: $version"
+          dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish/BingWallpaper -warnaserror -p:Version=$version
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
