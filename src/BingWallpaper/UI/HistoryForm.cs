@@ -80,6 +80,24 @@ internal sealed class HistoryForm : Form
         ThemeManager.ApplyToForm(this);
     }
 
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams cp = base.CreateParams;
+
+            // Every repaint in this window is otherwise put straight on the screen in
+            // two passes - the background first, the content after - which is what the
+            // status bar shows as a flicker each time a hovered tile rewrites it, and
+            // what the window shows on the way in as the tiles arrive one at a time.
+            // Composing off screen and putting up the result in one piece removes both.
+            // The usual price, a slower scroll, is not owed here: the window is sized
+            // to the whole grid, so it never scrolls.
+            cp.ExStyle |= NativeMethods.WS_EX_COMPOSITED;
+            return cp;
+        }
+    }
+
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
