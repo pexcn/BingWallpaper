@@ -121,20 +121,21 @@ internal sealed class ThemedRadioButton : RadioButton
 }
 
 /// <summary>
-/// Drop down list whose arrow button and focused value follow the palette.
+/// Drop down list drawn by the system, with the border drawn here.
 ///
-/// ThemeManager switches every ComboBox to FlatStyle.Flat in the dark theme,
-/// because the themed control draws a light frame around its text. Flat in turn
-/// paints the arrow button as a light grey square with a black glyph, and no
-/// property recolours it. A ComboBox is a native window that ignores
-/// ControlStyles.UserPaint, so both the button and the value are painted over
-/// after the control has finished drawing itself.
+/// The dark colours come from SetWindowTheme("DarkMode_CFD") in ThemeManager plus
+/// the process wide ForceDark app mode - background, value, arrow button, hot and
+/// focus states are all the system's. Only its border comes out dark as well, and a
+/// dark frame on a dark dialog stops reading as an edge, so that one line is drawn
+/// over the top.
 ///
-/// Dropping the overlay and leaving the dark theme to SetWindowTheme("DarkMode_CFD")
-/// plus the process wide ForceDark app mode was tried and reverted: the control does
-/// come out dark that way, but so does its border, and a dark frame on a dark dialog
-/// stops holding the control together. The palette border below, and the accent one
-/// under the focus, are what still read as an edge.
+/// FlatStyle stays Standard in both themes on purpose. Flat was how the dark theme
+/// used to get rid of a light frame, at the price of two things this control spent
+/// three attempts learning: the WinForms FlatComboAdapter then paints a light button
+/// over the native one (the flash the mouse used to leave behind), and ComboBox's own
+/// WM_PAINT handler starts clipping by way of GetUpdateRgn - which a paint cycle
+/// opened out here has already validated away, leaving the clip empty and the value
+/// text unpainted. Standard keeps WinForms out of the painting altogether.
 /// </summary>
 internal sealed class ThemedComboBox : ComboBox
 {
@@ -156,9 +157,8 @@ internal sealed class ThemedComboBox : ComboBox
     /// So the device context is opened here and passed down through the wParam of
     /// WM_PAINT. ComboBox honours a context given that way - "useBeginPaint =
     /// m.WParam == 0" in its own handler - and paints into it instead of opening one
-    /// of its own. It also reads the update region through GetUpdateRgn while doing
-    /// so, which is why the region goes back before the message is forwarded - see
-    /// the comment below.
+    /// of its own. Under FlatStyle.Standard that message goes straight through to the
+    /// native control, so nothing else in WinForms gets between the two paints.
     /// </para>
     /// </summary>
     protected override void WndProc(ref Message m)
@@ -189,16 +189,7 @@ internal sealed class ThemedComboBox : ComboBox
 
         try
         {
-            // BeginPaint validated the update region on the way out, and ComboBox needs
-            // it: its own WM_PAINT handler calls GetUpdateRgn to build the clip that
-            // keeps the drop down button out of what the native control paints. Given an
-            // empty update region that clip comes out empty too, and everything the
-            // control draws - the value text above all - is thrown away. So the region
-            // goes back before the message is forwarded, and is taken away again after:
-            // a window left invalid would ask to be painted for ever.
-            NativeMethods.InvalidateRect(Handle, ref paint.PaintRectangle, false);
             PaintInto(hdc);
-            NativeMethods.ValidateRect(Handle, IntPtr.Zero);
         }
         finally
         {
@@ -210,9 +201,9 @@ internal sealed class ThemedComboBox : ComboBox
 
     /// <summary>
     /// Paints the control and then the overlay into one device context. The state of
-    /// the context is put back in between: the base class clips it while it paints -
-    /// the flat adapter keeps the drop down button out of what the native control
-    /// draws - and the overlay needs the whole client area again.
+    /// the context is put back in between: what the native control leaves behind in a
+    /// context it was handed - a clipping region above all - is its own business, and
+    /// the border below needs the whole client area.
     /// </summary>
     private void PaintInto(IntPtr hdc)
     {
@@ -244,66 +235,15 @@ internal sealed class ThemedComboBox : ComboBox
         base.OnLostFocus(e);
     }
 
+    /// <summary>
+    /// One line over the top of what the system drew. Anti aliasing is off - see
+    /// ThemedButton for what it does to the corner pixels of a one pixel rectangle.
+    /// </summary>
     private void PaintOverlay(Graphics g)
     {
         ThemePalette palette = ThemeManager.Palette;
-
-        int buttonWidth = SystemInformation.VerticalScrollBarWidth;
-        Rectangle button = new(Width - buttonWidth - 1, 1, buttonWidth, Height - 2);
-        using (SolidBrush background = new(palette.ControlBackground))
-        {
-            g.FillRectangle(background, button);
-
-            // A DropDownList paints its value in the system highlight colours while
-            // it has the focus - a blue block behind white text, plus a dotted focus
-            // rectangle - and neither colour comes from the palette. The value is
-            // drawn again over the top; the focus shows as an accent border instead,
-            // which is also what the radio buttons and check boxes use.
-            if (Focused)
-            {
-                Rectangle text = new(1, 1, button.Left - 1, Height - 2);
-                g.FillRectangle(background, text);
-
-                // The inset the native control leaves in front of its text. NoPadding
-                // is what makes it the whole inset: TextRenderer adds a glyph overhang
-                // of its own otherwise, and the value would shift to the right by a
-                // few pixels every time the control took the focus.
-                text.Inflate(-DpiScale.Round(2), 0);
-                TextRenderer.DrawText(
-                    g,
-                    Text,
-                    Font,
-                    text,
-                    Enabled ? palette.Text : palette.SecondaryText,
-                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                    TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
-                    TextFormatFlags.EndEllipsis);
-            }
-        }
-
-        // Before the chevron, and with no anti aliasing: an anti aliased one pixel
-        // rectangle only partly covers its corner pixels, and the flat border
-        // underneath is drawn in SystemColors.ControlDark, which stays light in the
-        // dark theme - so the corners came out as four bright dots.
-        using (Pen border = new(Focused ? palette.Accent : palette.Border))
-        {
-            g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
-        }
-
-        // A chevron, matching what the visual styles draw in the light palette.
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        int arm = DpiScale.Round(4);
-        int centreX = button.Left + (button.Width / 2);
-        int centreY = button.Top + (button.Height / 2) - (arm / 2);
-        using (Pen glyph = new(Enabled ? palette.Text : palette.SecondaryText, Math.Max(1, DpiScale.Round(1))))
-        {
-            g.DrawLines(glyph, new[]
-            {
-                new Point(centreX - arm, centreY),
-                new Point(centreX, centreY + arm),
-                new Point(centreX + arm, centreY),
-            });
-        }
+        using Pen border = new(Focused ? palette.Accent : palette.Border);
+        g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
     }
 }
 

@@ -199,9 +199,13 @@ internal static class ThemeManager
                 break;
 
             case ComboBox comboBox:
+                // Standard in both themes: it is the one FlatStyle that leaves the
+                // painting to the control itself. Flat pulls the WinForms flat adapter
+                // into the paint cycle, which costs more than the light frame it was
+                // there to remove - see ThemedComboBox.
                 comboBox.BackColor = palette.ControlBackground;
                 comboBox.ForeColor = palette.Text;
-                comboBox.FlatStyle = dark ? FlatStyle.Flat : FlatStyle.Standard;
+                comboBox.FlatStyle = FlatStyle.Standard;
                 ApplyNativeTheme(comboBox, dark ? "DarkMode_CFD" : null);
                 break;
 

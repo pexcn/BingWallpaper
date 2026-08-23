@@ -40,8 +40,9 @@ internal static class NativeMethods
     }
 
     /// <summary>
-    /// PAINTSTRUCT, winuser.h. Only the device context and the paint rectangle are
-    /// ever read back, so the reserved tail gets no fields of its own - Size pins the
+    /// PAINTSTRUCT, winuser.h. Only the device context is ever read back, but the
+    /// fields before it have to be laid out for the window manager to write into -
+    /// the reserved tail does not, so it gets no fields of its own. Size pins the
     /// struct to the 72 bytes the window manager writes on x64, which is what this
     /// executable targets (see PlatformTarget in the csproj).
     /// </summary>
@@ -80,22 +81,6 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool RestoreDC(IntPtr hdc, int savedState);
-
-    /// <summary>
-    /// user32!InvalidateRect. Marks a rectangle of a window as needing to be painted.
-    /// Available since Windows 2000.
-    /// </summary>
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool InvalidateRect(IntPtr hWnd, ref RECT rect, [MarshalAs(UnmanagedType.Bool)] bool erase);
-
-    /// <summary>
-    /// user32!ValidateRect. A null rectangle validates the whole window. Available
-    /// since Windows 2000.
-    /// </summary>
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool ValidateRect(IntPtr hWnd, IntPtr rect);
 
     /// <summary>
     /// user32!SystemParametersInfoW. Available since Windows 2000.
