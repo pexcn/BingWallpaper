@@ -298,8 +298,8 @@ internal sealed class HistoryForm : Form
             BingImageInfo image = _images[i];
             try
             {
-                byte[] bytes = await _context.Client
-                    .DownloadBytesAsync(image.GetThumbnailUrl(), cancellationToken)
+                byte[] bytes = await _context.Thumbnails
+                    .GetAsync(image.GetThumbnailUrl(), cancellationToken)
                     .ConfigureAwait(true);
 
                 if (cancellationToken.IsCancellationRequested || IsDisposed || i >= _tiles.Count)

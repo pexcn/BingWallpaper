@@ -20,6 +20,7 @@ internal sealed class TrayContext : ApplicationContext
 {
     private readonly AppConfig _config;
     private readonly BingClient _client = new();
+    private readonly ThumbnailCache _thumbnails;
     private readonly HiddenWindow _window;
     private readonly NotifyIcon _tray;
     private readonly ContextMenuStrip _menu;
@@ -49,6 +50,7 @@ internal sealed class TrayContext : ApplicationContext
     public TrayContext(AppConfig config)
     {
         _config = config;
+        _thumbnails = new ThumbnailCache(_client);
 
         _window = new HiddenWindow();
         _window.SystemColorSchemeChanged += (_, _) => ThemeManager.HandleSystemThemeChanged();
@@ -129,6 +131,9 @@ internal sealed class TrayContext : ApplicationContext
 
     public BingClient Client => _client;
 
+    /// <summary>Thumbnails of <see cref="Images"/>, kept across history windows.</summary>
+    public ThumbnailCache Thumbnails => _thumbnails;
+
     /// <summary>Index into <see cref="Images"/>, or -1 when the wallpaper is not in that list.</summary>
     public int CurrentIndex => _currentIndex;
 
@@ -161,8 +166,19 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
-        _images = images;
+        SetImages(images);
         UpdateMenuState();
+    }
+
+    /// <summary>
+    /// The one place the current list is replaced. The thumbnail cache is trimmed to
+    /// it here rather than at each call site, so it cannot start collecting eight more
+    /// entries a day the moment someone adds a third way to set the list.
+    /// </summary>
+    private void SetImages(List<BingImageInfo> images)
+    {
+        _images = images;
+        _thumbnails.Retain(images);
     }
 
     /// <summary>Downloads (if needed) and applies the image at <paramref name="index"/>.</summary>
@@ -270,7 +286,7 @@ internal sealed class TrayContext : ApplicationContext
                 .FetchAsync(_config.Market, 0, BingClient.MaxImageCount, _shutdown.Token)
                 .ConfigureAwait(true);
 
-            _images = images;
+            SetImages(images);
             _historyForm?.OnImagesRefreshed(images);
 
             if (_config.IsPinned)
