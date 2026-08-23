@@ -30,6 +30,51 @@ internal static class NativeMethods
     public const int WS_EX_COMPOSITED = 0x02000000;
 
     /// <summary>
+    /// PAINTSTRUCT, winuser.h. Only the device context is ever read back, so the
+    /// reserved tail gets no fields of its own - Size pins the struct to the 72
+    /// bytes the window manager writes on x64, which is what this executable
+    /// targets (see PlatformTarget in the csproj).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, Size = 72)]
+    public struct PAINTSTRUCT
+    {
+        public IntPtr Hdc;
+        public int Erase;
+        public int PaintLeft;
+        public int PaintTop;
+        public int PaintRight;
+        public int PaintBottom;
+        public int Restore;
+        public int IncUpdate;
+    }
+
+    /// <summary>
+    /// user32!BeginPaint. Available since Windows 2000. Opens the painting cycle of
+    /// a window: it hands back a device context and validates the update region, so
+    /// it has to be paired with EndPaint or the window keeps asking to be painted.
+    /// </summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr BeginPaint(IntPtr hWnd, ref PAINTSTRUCT paint);
+
+    /// <summary>user32!EndPaint. Available since Windows 2000.</summary>
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool EndPaint(IntPtr hWnd, ref PAINTSTRUCT paint);
+
+    /// <summary>
+    /// gdi32!SaveDC. Pushes the state of a device context - clipping region, selected
+    /// objects, drawing modes - and returns a level to restore it by. Available since
+    /// Windows 2000.
+    /// </summary>
+    [DllImport("gdi32.dll")]
+    public static extern int SaveDC(IntPtr hdc);
+
+    /// <summary>gdi32!RestoreDC. Available since Windows 2000.</summary>
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool RestoreDC(IntPtr hdc, int savedState);
+
+    /// <summary>
     /// user32!SystemParametersInfoW. Available since Windows 2000.
     /// </summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

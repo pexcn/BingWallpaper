@@ -143,14 +143,81 @@ internal sealed class ThemedComboBox : ComboBox
 
     public ThemedComboBox() => DropDownStyle = ComboBoxStyle.DropDownList;
 
+    /// <summary>
+    /// Paints the control and the overlay in one cycle.
+    /// <para>
+    /// Overlaying after base.WndProc returns means overlaying after EndPaint: the
+    /// light flat button and border are on screen by then, and the dark overlay is a
+    /// second, later update. That is the flicker the mouse leaves behind when it
+    /// crosses the control - FlatStyle.Flat repaints the button on hover, and every
+    /// one of those repaints shows light before it shows dark.
+    /// </para>
+    /// <para>
+    /// So the device context is opened here and passed down through the wParam of
+    /// WM_PAINT. ComboBox honours a context given that way and paints into it
+    /// instead of opening one of its own; letting it call BeginPaint a second time
+    /// would hand it an update region this one has already validated, and everything
+    /// below would be clipped away.
+    /// </para>
+    /// </summary>
     protected override void WndProc(ref Message m)
     {
-        base.WndProc(ref m);
-
-        if (m.Msg == WM_PAINT && ThemeManager.Palette.IsDark)
+        if (m.Msg != WM_PAINT || !ThemeManager.Palette.IsDark)
         {
-            PaintOverlay();
+            base.WndProc(ref m);
+            return;
         }
+
+        if (m.WParam != IntPtr.Zero)
+        {
+            // The cycle belongs to someone else - a thumbnail, a print. Paint into it.
+            PaintInto(m.WParam);
+            m.Result = IntPtr.Zero;
+            return;
+        }
+
+        NativeMethods.PAINTSTRUCT paint = default;
+        IntPtr hdc = NativeMethods.BeginPaint(Handle, ref paint);
+        if (hdc == IntPtr.Zero)
+        {
+            // Nothing was validated, so leave the cycle to the base class rather than
+            // return to a window that asks to be painted again straight away.
+            base.WndProc(ref m);
+            return;
+        }
+
+        try
+        {
+            PaintInto(hdc);
+        }
+        finally
+        {
+            NativeMethods.EndPaint(Handle, ref paint);
+        }
+
+        m.Result = IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Paints the control and then the overlay into one device context. The state of
+    /// the context is put back in between: the base class clips it while it paints -
+    /// the flat adapter keeps the drop down button out of what the native control
+    /// draws - and the overlay needs the whole client area again.
+    /// </summary>
+    private void PaintInto(IntPtr hdc)
+    {
+        int state = NativeMethods.SaveDC(hdc);
+        Message forwarded = Message.Create(Handle, WM_PAINT, hdc, IntPtr.Zero);
+        base.WndProc(ref forwarded);
+        if (state != 0)
+        {
+            NativeMethods.RestoreDC(hdc, state);
+        }
+
+        // The context is not disposed with it: Graphics.FromHdc borrows one, and this
+        // one belongs to whoever opened the cycle.
+        using Graphics g = Graphics.FromHdc(hdc);
+        PaintOverlay(g);
     }
 
     protected override void OnGotFocus(EventArgs e)
@@ -167,10 +234,9 @@ internal sealed class ThemedComboBox : ComboBox
         base.OnLostFocus(e);
     }
 
-    private void PaintOverlay()
+    private void PaintOverlay(Graphics g)
     {
         ThemePalette palette = ThemeManager.Palette;
-        using Graphics g = Graphics.FromHwnd(Handle);
 
         int buttonWidth = SystemInformation.VerticalScrollBarWidth;
         Rectangle button = new(Width - buttonWidth - 1, 1, buttonWidth, Height - 2);
