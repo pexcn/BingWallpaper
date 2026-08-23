@@ -484,6 +484,26 @@ internal sealed class ThemedButton : Button
         base.OnMouseDown(e);
     }
 
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        // Holding the button down and dragging out of it cancels the click, dragging
+        // back in arms it again - the base class tracks that on its own, and the click
+        // does fire on a release back inside. OnMouseLeave clears _pressed and nothing
+        // else ever sets it again, so without this the paint says "not pressed" while
+        // the release is about to activate the button.
+        if (Capture && (e.Button & MouseButtons.Left) == MouseButtons.Left)
+        {
+            bool inside = ClientRectangle.Contains(e.Location);
+            if (inside != _pressed)
+            {
+                _pressed = inside;
+                Invalidate();
+            }
+        }
+
+        base.OnMouseMove(e);
+    }
+
     protected override void OnMouseUp(MouseEventArgs e)
     {
         if (_pressed)
@@ -493,6 +513,34 @@ internal sealed class ThemedButton : Button
         }
 
         base.OnMouseUp(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        // Space is the only key that holds a button down; Enter goes through
+        // PerformClick, which has no sustained pressed state on a stock button either.
+        // ButtonBase does record the space press, but only in a flag it keeps to
+        // itself, and ControlStyles.UserPaint takes its repaint path out of the
+        // picture - so the keyboard would activate this button without it ever
+        // looking pressed.
+        if (e.KeyCode == Keys.Space && !_pressed)
+        {
+            _pressed = true;
+            Invalidate();
+        }
+
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Space && _pressed)
+        {
+            _pressed = false;
+            Invalidate();
+        }
+
+        base.OnKeyUp(e);
     }
 
     protected override void OnEnabledChanged(EventArgs e)
@@ -509,6 +557,9 @@ internal sealed class ThemedButton : Button
 
     protected override void OnLostFocus(EventArgs e)
     {
+        // No key up is coming once the focus is gone, so a space that was still held
+        // would leave the button painted as pressed for good.
+        _pressed = false;
         Invalidate();
         base.OnLostFocus(e);
     }
