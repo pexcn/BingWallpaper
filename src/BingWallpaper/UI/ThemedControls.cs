@@ -121,13 +121,15 @@ internal sealed class ThemedRadioButton : RadioButton
 }
 
 /// <summary>
-/// Drop down list drawn by the system, with the border drawn here.
+/// Drop down list drawn by the system, with the border and the focused value drawn
+/// here.
 ///
 /// The dark colours come from SetWindowTheme("DarkMode_CFD") in ThemeManager plus
-/// the process wide ForceDark app mode - background, value, arrow button, hot and
-/// focus states are all the system's. Only its border comes out dark as well, and a
-/// dark frame on a dark dialog stops reading as an edge, so that one line is drawn
-/// over the top.
+/// the process wide ForceDark app mode - background, value, arrow button and hot
+/// state are all the system's. Two things it does not cover are drawn over the top:
+/// the border, which comes out as dark as the dialog behind it and stops reading as
+/// an edge, and the value while the control has the focus, which a drop down list
+/// paints in the system highlight colours whatever the theme says.
 ///
 /// FlatStyle stays Standard in both themes on purpose. Flat was how the dark theme
 /// used to get rid of a light frame, at the price of two things this control spent
@@ -236,12 +238,45 @@ internal sealed class ThemedComboBox : ComboBox
     }
 
     /// <summary>
-    /// One line over the top of what the system drew. Anti aliasing is off - see
-    /// ThemedButton for what it does to the corner pixels of a one pixel rectangle.
+    /// One line over the top of what the system drew, and the value with it while the
+    /// control has the focus. Anti aliasing is off - see ThemedButton for what it does
+    /// to the corner pixels of a one pixel rectangle.
     /// </summary>
     private void PaintOverlay(Graphics g)
     {
         ThemePalette palette = ThemeManager.Palette;
+
+        // A DropDownList paints its value in the system highlight colours while it has
+        // the focus - a blue block behind white text - and neither colour comes from
+        // the palette. The dark theme does not cover it either: DarkMode_CFD recolours
+        // the control, not COLOR_HIGHLIGHT. The value is drawn again over the top; the
+        // focus shows as the accent border below instead, which is also what the radio
+        // buttons and check boxes use.
+        if (Focused)
+        {
+            int buttonWidth = SystemInformation.VerticalScrollBarWidth;
+            Rectangle text = new(1, 1, Width - buttonWidth - 2, Height - 2);
+            using (SolidBrush background = new(palette.ControlBackground))
+            {
+                g.FillRectangle(background, text);
+            }
+
+            // The inset the native control leaves in front of its text. NoPadding is
+            // what makes it the whole inset: TextRenderer adds a glyph overhang of its
+            // own otherwise, and the value would shift to the right by a few pixels
+            // every time the control took the focus.
+            text.Inflate(-DpiScale.Round(2), 0);
+            TextRenderer.DrawText(
+                g,
+                Text,
+                Font,
+                text,
+                Enabled ? palette.Text : palette.SecondaryText,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+                TextFormatFlags.EndEllipsis);
+        }
+
         using Pen border = new(Focused ? palette.Accent : palette.Border);
         g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
     }
