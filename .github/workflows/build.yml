@@ -25,17 +25,22 @@ jobs:
       # -warnaserror keeps the "no compiler warnings" rule enforced instead of
       # merely observed. Drop the flag if a future SDK introduces new warnings.
       - name: Publish
-        run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish -warnaserror
+        run: dotnet publish src/BingWallpaper/BingWallpaper.csproj -c Release -o publish/BingWallpaper -warnaserror
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: BingWallpaper
-          path: publish/BingWallpaper.exe
+          path: publish/*
           if-no-files-found: error
+
+      - name: Package release archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: Compress-Archive -Path publish/BingWallpaper -DestinationPath BingWallpaper.zip
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          files: publish/BingWallpaper.exe
+          files: BingWallpaper.zip
