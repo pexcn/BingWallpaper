@@ -121,15 +121,18 @@ internal sealed class ThemedRadioButton : RadioButton
 }
 
 /// <summary>
-/// Drop down list drawn by the system, with the border and the focused value drawn
-/// here.
+/// Drop down list drawn by the system, with the border and the value drawn here.
 ///
 /// The dark colours come from SetWindowTheme("DarkMode_CFD") in ThemeManager plus
-/// the process wide ForceDark app mode - background, value, arrow button and hot
-/// state are all the system's. Two things it does not cover are drawn over the top:
-/// the border, which comes out as dark as the dialog behind it and stops reading as
-/// an edge, and the value while the control has the focus, which a drop down list
-/// paints in the system highlight colours whatever the theme says.
+/// the process wide ForceDark app mode: the theme paints the box, the arrow button
+/// and the hot and pressed states, and it is left to do so. Two things it does not
+/// get right are painted over the top. The border comes out as dark as the dialog
+/// behind it and stops reading as an edge. And the value rectangle is filled by the
+/// control rather than the theme - with BackColor, by way of WM_CTLCOLOREDIT, or
+/// with the system highlight when the control has the focus - so it sits a shade
+/// apart from the rest of the box and does not follow it under the mouse. The
+/// colour the theme used is read back off the box and the value is drawn again in
+/// it; see SampleThemeFill.
 ///
 /// FlatStyle stays Standard in both themes on purpose. Flat was how the dark theme
 /// used to get rid of a light frame, at the price of two things this control spent
@@ -217,16 +220,46 @@ internal sealed class ThemedComboBox : ComboBox
             NativeMethods.RestoreDC(hdc, state);
         }
 
+        // Read before the Graphics is built: a Graphics owns the context it wraps, and
+        // GDI calls made behind its back are not allowed while it lives.
+        Color fill = SampleThemeFill(hdc);
+
         // The context is not disposed with it: Graphics.FromHdc borrows one, and this
         // one belongs to whoever opened the cycle.
         using Graphics g = Graphics.FromHdc(hdc);
-        PaintOverlay(g);
+        PaintOverlay(g, fill);
+    }
+
+    /// <summary>
+    /// The colour the theme has just filled the box with, read back out of the device
+    /// context the control painted into.
+    /// <para>
+    /// It cannot be a palette entry, because it is not one colour: DarkMode_CFD fills
+    /// the box differently when the mouse is over it and differently again while the
+    /// list is down, and no property tells us which of them is in force. Reading a
+    /// pixel back follows all three for free.
+    /// </para>
+    /// <para>
+    /// The point is inside the arrow button, above the chevron: the button is the one
+    /// part of the box the theme always paints and the control never paints over, and
+    /// matching it is the whole aim - a value that is the same colour as the arrow
+    /// beside it. A context that will not give the pixel back falls to the resting
+    /// colour, which is what the box used to be filled with throughout.
+    /// </para>
+    /// </summary>
+    private Color SampleThemeFill(IntPtr hdc)
+    {
+        int buttonWidth = SystemInformation.VerticalScrollBarWidth;
+        uint colour = NativeMethods.GetPixel(hdc, Width - (buttonWidth / 2) - 1, DpiScale.Round(4));
+        return colour == NativeMethods.CLR_INVALID
+            ? ThemeManager.Palette.DropDownBackground
+            : Color.FromArgb((int)(colour & 0xFF), (int)((colour >> 8) & 0xFF), (int)((colour >> 16) & 0xFF));
     }
 
     protected override void OnGotFocus(EventArgs e)
     {
-        // The value is painted differently with and without the focus, and the
-        // native control does not repaint the whole client area when it changes.
+        // The border changes colour with the focus, and the control below repaints its
+        // value in the system highlight without repainting the whole client area.
         Invalidate();
         base.OnGotFocus(e);
     }
@@ -238,44 +271,43 @@ internal sealed class ThemedComboBox : ComboBox
     }
 
     /// <summary>
-    /// One line over the top of what the system drew, and the value with it while the
-    /// control has the focus. Anti aliasing is off - see ThemedButton for what it does
-    /// to the corner pixels of a one pixel rectangle.
+    /// The value, in the colour the arrow button beside it came out, and one line of
+    /// border around the lot. Anti aliasing is off for that line - see ThemedButton
+    /// for what it does to the corner pixels of a one pixel rectangle.
     /// </summary>
-    private void PaintOverlay(Graphics g)
+    private void PaintOverlay(Graphics g, Color fill)
     {
         ThemePalette palette = ThemeManager.Palette;
 
-        // A DropDownList paints its value in the system highlight colours while it has
-        // the focus - a blue block behind white text - and neither colour comes from
-        // the palette. The dark theme does not cover it either: DarkMode_CFD recolours
-        // the control, not COLOR_HIGHLIGHT. The value is drawn again over the top; the
-        // focus shows as the accent border below instead, which is also what the radio
+        // The value rectangle is filled twice over: the theme fills the whole box, and
+        // then the control fills this part of it again, with the brush WinForms answers
+        // WM_CTLCOLOREDIT with - a single colour that cannot follow the theme into its
+        // hot and pressed states, and that a focused drop down list swaps for the
+        // system highlight regardless. So the last word is taken here, in the colour
+        // the theme actually used, and the value is drawn again over the top. The focus
+        // shows as the accent border below instead, which is also what the radio
         // buttons and check boxes use.
-        if (Focused)
+        int buttonWidth = SystemInformation.VerticalScrollBarWidth;
+        Rectangle text = new(1, 1, Width - buttonWidth - 2, Height - 2);
+        using (SolidBrush background = new(fill))
         {
-            int buttonWidth = SystemInformation.VerticalScrollBarWidth;
-            Rectangle text = new(1, 1, Width - buttonWidth - 2, Height - 2);
-            using (SolidBrush background = new(palette.DropDownBackground))
-            {
-                g.FillRectangle(background, text);
-            }
-
-            // The inset the native control leaves in front of its text. NoPadding is
-            // what makes it the whole inset: TextRenderer adds a glyph overhang of its
-            // own otherwise, and the value would shift to the right by a few pixels
-            // every time the control took the focus.
-            text.Inflate(-DpiScale.Round(2), 0);
-            TextRenderer.DrawText(
-                g,
-                Text,
-                Font,
-                text,
-                Enabled ? palette.Text : palette.SecondaryText,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
-                TextFormatFlags.EndEllipsis);
+            g.FillRectangle(background, text);
         }
+
+        // The inset the native control leaves in front of its text. NoPadding is what
+        // makes it the whole inset: TextRenderer adds a glyph overhang of its own
+        // otherwise, and the value would sit a few pixels right of where the control
+        // itself puts it.
+        text.Inflate(-DpiScale.Round(2), 0);
+        TextRenderer.DrawText(
+            g,
+            Text,
+            Font,
+            text,
+            Enabled ? palette.Text : palette.SecondaryText,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+            TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding |
+            TextFormatFlags.EndEllipsis);
 
         using Pen border = new(Focused ? palette.Accent : palette.Border);
         g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);

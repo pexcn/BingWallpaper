@@ -82,6 +82,17 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool RestoreDC(IntPtr hdc, int savedState);
 
+    /// <summary>CLR_INVALID - what GetPixel returns for a point it cannot read.</summary>
+    public const uint CLR_INVALID = 0xFFFFFFFF;
+
+    /// <summary>
+    /// gdi32!GetPixel. Reads one pixel back out of a device context as a COLORREF -
+    /// 0x00BBGGRR, so the bytes are the reverse of what Color.FromArgb takes.
+    /// Available since Windows 2000.
+    /// </summary>
+    [DllImport("gdi32.dll")]
+    public static extern uint GetPixel(IntPtr hdc, int x, int y);
+
     /// <summary>
     /// user32!SystemParametersInfoW. Available since Windows 2000.
     /// </summary>
