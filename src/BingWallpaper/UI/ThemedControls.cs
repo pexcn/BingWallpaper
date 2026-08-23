@@ -543,23 +543,9 @@ internal sealed class ThemedButton : Button
         base.OnKeyUp(e);
     }
 
-    protected override void OnVisibleChanged(EventArgs e)
-    {
-        // The settings window hides itself from this button's own Click handler, so it
-        // disappears out from under a pointer that never moves - and WM_MOUSELEAVE is
-        // delivered off a later hit test, which may simply never come. The form is
-        // reused rather than destroyed, so a _hovered left standing here is what the
-        // button would be painted with the next time it is shown, with the pointer
-        // parked over the tray.
-        ResetInput();
-        base.OnVisibleChanged(e);
-    }
-
     protected override void OnEnabledChanged(EventArgs e)
     {
-        // Same story as above: a button disabled under the pointer gets no leave event
-        // either, and the stale state would surface when it is enabled again.
-        ResetInput();
+        Invalidate();
         base.OnEnabledChanged(e);
     }
 
@@ -576,13 +562,5 @@ internal sealed class ThemedButton : Button
         _pressed = false;
         Invalidate();
         base.OnLostFocus(e);
-    }
-
-    /// <summary>Drops the hover and pressed state and repaints.</summary>
-    private void ResetInput()
-    {
-        _hovered = false;
-        _pressed = false;
-        Invalidate();
     }
 }

@@ -109,17 +109,6 @@ internal sealed class HistoryForm : Form
             (row * Rows) + _grid.Padding.Vertical + _statusSeparator.Height + _status.Height);
     }
 
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        if (e.CloseReason == CloseReason.UserClosing)
-        {
-            e.Cancel = true;
-            Hide();
-        }
-
-        base.OnFormClosing(e);
-    }
-
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -171,9 +160,16 @@ internal sealed class HistoryForm : Form
                 .ConfigureAwait(true);
 
             // Keep the tray menu and this window on the same list, otherwise the
-            // indices used for applying an image would not match.
+            // indices used for applying an image would not match. Worth doing even
+            // when the window is gone: the tray menu is the other reader of that list.
             _context.AdoptImages(images);
-            Populate(images);
+
+            // Closing this window disposes it, and that can happen while the fetch is
+            // still in flight - there is nothing left to populate.
+            if (!IsDisposed)
+            {
+                Populate(images);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -182,7 +178,10 @@ internal sealed class HistoryForm : Form
         catch (Exception ex)
         {
             Logger.Error("Could not load the wallpaper history.", ex);
-            SetStatus("获取壁纸列表失败，详见日志文件。");
+            if (!IsDisposed)
+            {
+                SetStatus("获取壁纸列表失败，详见日志文件。");
+            }
         }
     }
 

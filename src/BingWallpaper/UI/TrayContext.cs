@@ -628,6 +628,10 @@ internal sealed class TrayContext : ApplicationContext
 
     private void ShowSettings()
     {
+        // Closing a window disposes it, so this is the usual path rather than a corner
+        // case: every open builds a fresh window, which is what gets it centred and
+        // free of whatever state the last one was left in. The field is kept only so
+        // that a window already on screen is brought forward instead of duplicated.
         if (_settingsForm is null || _settingsForm.IsDisposed)
         {
             _settingsForm = new SettingsForm(_config);

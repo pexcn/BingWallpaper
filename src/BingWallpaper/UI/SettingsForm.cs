@@ -167,18 +167,6 @@ internal sealed class SettingsForm : Form
         ClientSize = new Size(width, height);
     }
 
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        // Hide, never dispose: the tray context keeps the instance alive.
-        if (e.CloseReason == CloseReason.UserClosing)
-        {
-            e.Cancel = true;
-            Hide();
-        }
-
-        base.OnFormClosing(e);
-    }
-
     private void BuildLayout()
     {
         TableLayoutPanel fields = new()
@@ -476,7 +464,7 @@ internal sealed class SettingsForm : Form
             Persist(SettingKind.RunAtStartup);
         };
 
-        _closeButton.Click += (_, _) => Hide();
+        _closeButton.Click += (_, _) => Close();
     }
 
     private void CommitResolution(RadioButton button, ResolutionKind resolution)
