@@ -6,9 +6,10 @@
 
 ![历史壁纸](docs/history.png)
 
-| 设置 · 浅色 | 设置 · 深色 | 托盘菜单 |
-| :---: | :---: | :---: |
-| ![设置 · 浅色](docs/settings-light.png) | ![设置 · 深色](docs/settings-dark.png) | ![托盘菜单](docs/tray.png) |
+| 浅色 | 深色 |
+| :---: | :---: |
+| ![设置 · 浅色](docs/settings-light.png) | ![设置 · 深色](docs/settings-dark.png) |
+| ![托盘菜单 · 浅色](docs/tray-light.png) | ![托盘菜单 · 深色](docs/tray-dark.png) |
 
 ## 特性
 
