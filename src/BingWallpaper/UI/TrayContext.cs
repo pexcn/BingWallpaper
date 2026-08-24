@@ -23,8 +23,10 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ThumbnailCache _thumbnails;
     private readonly HiddenWindow _window;
     private readonly NotifyIcon _tray;
-    private readonly ContextMenu _menu;
     private readonly System.Windows.Forms.Timer _timer;
+
+    // Replaced after every right click, see RecreateMenu.
+    private ContextMenu _menu;
 
     private readonly MenuItem _titleItem;
     private readonly MenuItem _newerItem;
@@ -68,26 +70,7 @@ internal sealed class TrayContext : ApplicationContext
         _settingsItem = new MenuItem("设置...", (_, _) => ShowSettings());
         _exitItem = new MenuItem("退出", (_, _) => ExitApplication());
 
-        // A native popup menu, the way every classic tray application builds one:
-        // Windows draws it with the shell's own metrics, font and theme, so it looks
-        // like the Explorer context menu instead of a WinForms imitation of it - in
-        // both colour schemes, see DarkModeNative.SetAppMode.
-        _menu = new ContextMenu(new[]
-        {
-            _titleItem,
-            new MenuItem("-"),
-            _olderItem,
-            _newerItem,
-            _historyItem,
-            _refreshItem,
-            _pinItem,
-            new MenuItem("-"),
-            _folderItem,
-            new MenuItem("-"),
-            _settingsItem,
-            _exitItem,
-        });
-        _menu.Popup += (_, _) => RemeasureMenu();
+        _menu = BuildMenu();
 
         _tray = new NotifyIcon
         {
@@ -97,6 +80,16 @@ internal sealed class TrayContext : ApplicationContext
             ContextMenu = _menu,
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
+
+        // NotifyIcon shows the menu from WM_RBUTTONUP and only raises MouseUp once
+        // TrackPopupMenuEx has returned, so this runs with the menu already closed.
+        _tray.MouseUp += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                RecreateMenu();
+            }
+        };
 
         _timer = new System.Windows.Forms.Timer { Interval = GetIntervalMilliseconds() };
         _timer.Tick += (_, _) => StartRefresh(userInitiated: false);
@@ -801,21 +794,48 @@ internal sealed class TrayContext : ApplicationContext
     private static string BracketDate(string date, bool locked) => locked ? "[" + date + "]" : date;
 
     /// <summary>
-    /// Forces Windows to measure the popup again before it is shown.
-    ///
-    /// Setting MenuItem.Text ends up in SetMenuItemInfo, which replaces the caption
-    /// but does not invalidate the width USER32 cached for the popup: the menu only
-    /// ever grows, so a single long picture title leaves it stretched for the rest of
-    /// the session. Windows re-measures when items are inserted or removed, and
-    /// touching the collection makes WinForms strip the items off the HMENU and
-    /// rebuild them on the next Handle access - which NotifyIcon reads after raising
-    /// Popup, so nothing is being tracked yet. Rebuilding a dozen items per right
-    /// click is not worth optimising into a "did the title shrink" check.
+    /// A native popup menu, the way every classic tray application builds one:
+    /// Windows draws it with the shell's own metrics, font and theme, so it looks
+    /// like the Explorer context menu instead of a WinForms imitation of it - in
+    /// both colour schemes, see DarkModeNative.SetAppMode.
     /// </summary>
-    private void RemeasureMenu()
+    private ContextMenu BuildMenu() => new(new[]
     {
-        _menu.MenuItems.Remove(_titleItem);
-        _menu.MenuItems.Add(0, _titleItem);
+        _titleItem,
+        new MenuItem("-"),
+        _olderItem,
+        _newerItem,
+        _historyItem,
+        _refreshItem,
+        _pinItem,
+        new MenuItem("-"),
+        _folderItem,
+        new MenuItem("-"),
+        _settingsItem,
+        _exitItem,
+    });
+
+    /// <summary>
+    /// Hands the tray icon a menu built on a fresh HMENU.
+    ///
+    /// Windows measures a popup menu once and caches the width on the menu handle
+    /// itself; changing a caption afterwards goes through SetMenuItemInfo, which
+    /// never invalidates it, and neither does removing and re-inserting the rows.
+    /// So a menu only ever grew: one long picture title left it stretched for the
+    /// rest of the session, even after switching back to a short one. Only a new
+    /// handle starts measuring from scratch.
+    ///
+    /// The rows that carry state are reused: Clear() detaches them without disposing,
+    /// so the emptied menu takes nothing with it when it goes and every caption, tick
+    /// and enabled flag survives the move to the new handle.
+    /// </summary>
+    private void RecreateMenu()
+    {
+        ContextMenu stale = _menu;
+        stale.MenuItems.Clear();
+        _menu = BuildMenu();
+        _tray.ContextMenu = _menu;
+        stale.Dispose();
     }
 
     /// <summary>
