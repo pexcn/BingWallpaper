@@ -17,9 +17,22 @@
 ## 语言
 
 代码、注释、日志、提交信息用英文；UI 文案、README、TODO 用中文。
-提交遵循 Conventional Commits，写清**为什么**这么改。
 
 代码风格跟随现有文件，不要引入新写法。
+
+## 提交
+
+遵循 Conventional Commits，正文写清**为什么**这么改。
+
+**AI 参与的改动必须在信息末尾署名**，空一行后加 `Co-Authored-By` trailer，
+谁改的署谁，多个模型接力就按参与顺序都列上：
+
+```
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+```
+
+其他 AI 用各自的标识（如 `Codex <noreply@openai.com>`），别都挂在 Claude 名下。
+纯人工的提交不加这一行。
 
 ## 注释
 
