@@ -582,8 +582,12 @@ internal sealed class TrayContext : ApplicationContext
         // characters the shell gives a tray tooltip.
         if (_appliedImage is not null)
         {
+            // The title row is the widest thing in the menu and therefore what sets
+            // its width. 48 characters is about as far as the menu can grow before it
+            // stops looking like a tray menu; the full title is a hover away in the
+            // tooltip and spelled out in the picker.
             string line = BracketDate(_appliedImage.DisplayDate, pinned) + " · " + _appliedImage.DisplayTitle;
-            _titleItem.Text = EscapeMnemonic(Truncate(line, 80));
+            _titleItem.Text = EscapeMnemonic(Truncate(line, 48));
             _tray.Text = Truncate("必应壁纸 · " + _appliedImage.DisplayTitle, 63);
         }
         else if (pinned && _appliedPath is not null)
@@ -592,7 +596,8 @@ internal sealed class TrayContext : ApplicationContext
             // all the metadata there is. Described twice on purpose - the menu row
             // brackets the date, the tooltip is the one place that stays silent
             // about the lock.
-            _titleItem.Text = EscapeMnemonic(DescribeWallpaperFile(_config.PinnedWallpaper, locked: true));
+            _titleItem.Text = EscapeMnemonic(
+                Truncate(DescribeWallpaperFile(_config.PinnedWallpaper, locked: true), 48));
             _tray.Text = Truncate(
                 "必应壁纸 · " + DescribeWallpaperFile(_config.PinnedWallpaper, locked: false),
                 63);
