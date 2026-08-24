@@ -87,6 +87,7 @@ internal sealed class TrayContext : ApplicationContext
             _settingsItem,
             _exitItem,
         });
+        _menu.Popup += (_, _) => RemeasureMenu();
 
         _tray = new NotifyIcon
         {
@@ -798,6 +799,24 @@ internal sealed class TrayContext : ApplicationContext
     /// underneath is what the brackets refer to.
     /// </summary>
     private static string BracketDate(string date, bool locked) => locked ? "[" + date + "]" : date;
+
+    /// <summary>
+    /// Forces Windows to measure the popup again before it is shown.
+    ///
+    /// Setting MenuItem.Text ends up in SetMenuItemInfo, which replaces the caption
+    /// but does not invalidate the width USER32 cached for the popup: the menu only
+    /// ever grows, so a single long picture title leaves it stretched for the rest of
+    /// the session. Windows re-measures when items are inserted or removed, and
+    /// touching the collection makes WinForms strip the items off the HMENU and
+    /// rebuild them on the next Handle access - which NotifyIcon reads after raising
+    /// Popup, so nothing is being tracked yet. Rebuilding a dozen items per right
+    /// click is not worth optimising into a "did the title shrink" check.
+    /// </summary>
+    private void RemeasureMenu()
+    {
+        _menu.MenuItems.Remove(_titleItem);
+        _menu.MenuItems.Add(0, _titleItem);
+    }
 
     /// <summary>
     /// Doubles the ampersands of a caption that comes from the outside. A single "&amp;"
