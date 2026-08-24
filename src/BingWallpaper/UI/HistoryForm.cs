@@ -58,7 +58,15 @@ internal sealed class HistoryForm : Form
         MaximizeBox = false;
 
         _grid.Dock = DockStyle.Fill;
-        _grid.AutoScroll = true;
+        // Off, and it has to stay off. FitToGrid sizes the window to exactly four
+        // columns with nothing to spare, so a scroll bar appearing costs a column.
+        // Minimising is enough to make that happen: the client area goes to zero, the
+        // panel reflows to one tile per row, and AutoScroll concludes it needs the
+        // vertical bar. Restoring gives the width back but not the bar, which now
+        // leaves room for three columns, and three columns are taller than the window,
+        // so the bar stays and the grid never recovers. Nothing here ever needs to
+        // scroll anyway - the window holds all MaxImageCount tiles by construction.
+        _grid.AutoScroll = false;
         _grid.WrapContents = true;
         _grid.FlowDirection = FlowDirection.LeftToRight;
         _grid.Padding = new Padding(8);
