@@ -189,8 +189,12 @@ internal sealed class ThumbnailTile : Control
     {
         // No anti aliasing on purpose - see ThemedComboBox for what it does to the
         // corner pixels of a one pixel rectangle.
-        Color colour = _isCurrent || _hovered ? palette.Accent : palette.Border;
-        int width = _isCurrent ? Math.Max(2, DpiScale.Round(2)) : Math.Max(1, DpiScale.Round(1));
+        // Hover and current share one emphasised frame. A single accent pixel reads as
+        // a hairline next to the picture rather than as a highlight, and the two states
+        // stay apart by the badge that only the current tile carries.
+        bool emphasised = _isCurrent || _hovered;
+        Color colour = emphasised ? palette.Accent : palette.Border;
+        int width = emphasised ? Math.Max(2, DpiScale.Round(2)) : Math.Max(1, DpiScale.Round(1));
         int inset = width / 2;
 
         using Pen pen = new(colour, width);
