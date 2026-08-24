@@ -32,6 +32,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 ```
 
 其他 AI 用各自的标识（如 `Codex <noreply@openai.com>`），别都挂在 Claude 名下。
+署真正干活的**模型**，不是外壳工具 —— 在 Copilot 里用 BYOK 接的哪个模型就署哪个。
 纯人工的提交不加这一行。
 
 ## 注释
