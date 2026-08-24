@@ -64,10 +64,14 @@ internal static class ThemeManager
     public static void SetMode(ThemeMode mode)
     {
         bool dark = Resolve(mode);
-        bool changed = mode != Mode || dark != Palette.IsDark;
         Mode = mode;
-        if (!changed)
+
+        // Only the effective palette decides whether to repaint. Switching between
+        // "follow system" and the explicit mode that already matches it changes no
+        // color, so repainting there would just flash every window for nothing.
+        if (dark == Palette.IsDark)
         {
+            Logger.Info("Theme mode is now " + mode + ", effective palette unchanged.");
             return;
         }
 
