@@ -2,15 +2,6 @@
 
 一个干净、便携、开源的 Bing 每日壁纸客户端。
 
-## 截图
-
-![历史壁纸](docs/history.png)
-
-| 浅色 | 深色 |
-| :---: | :---: |
-| ![设置 · 浅色](docs/settings-light.png) | ![设置 · 深色](docs/settings-dark.png) |
-| ![托盘菜单 · 浅色](docs/tray-light.png) | ![托盘菜单 · 深色](docs/tray-dark.png) |
-
 ## 特性
 
 - 常驻托盘，无主窗口，默认每小时检查一次今日壁纸
@@ -22,6 +13,15 @@
 - 手写深色模式，**在 Windows 10 上同样有效**，可跟随系统实时切换
 - 完全便携：配置、日志、壁纸全部位于程序目录，删除整个文件夹即可完整卸载
 - 零第三方依赖，**单文件几百 KB 的可执行文件，无需安装任何运行时**
+
+## 截图
+
+| 浅色 | 深色 |
+| :---: | :---: |
+| ![设置 · 浅色](docs/settings-light.png) | ![设置 · 深色](docs/settings-dark.png) |
+| ![托盘菜单 · 浅色](docs/tray-light.png) | ![托盘菜单 · 深色](docs/tray-dark.png) |
+
+![历史壁纸](docs/history.png)
 
 ## 系统要求
 
