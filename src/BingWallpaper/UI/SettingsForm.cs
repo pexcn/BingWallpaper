@@ -51,8 +51,8 @@ internal sealed class SettingsForm : Form
     private readonly ThemedRadioButton _resolution1080 = new("1080p");
     private readonly ThemedComboBox _fitBox = new();
     private readonly ThemedRadioButton _themeSystem = new("跟随系统");
-    private readonly ThemedRadioButton _themeLight = new("亮色");
-    private readonly ThemedRadioButton _themeDark = new("暗色");
+    private readonly ThemedRadioButton _themeLight = new("浅色");
+    private readonly ThemedRadioButton _themeDark = new("深色");
     private readonly ThemedComboBox _intervalBox = new();
     private readonly ThemedComboBox _keepDaysBox = new();
     // No caption: the row label carries it, like every other setting.
