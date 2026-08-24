@@ -174,6 +174,15 @@ internal sealed class ThumbnailTile : Control
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
         g.DrawImage(_thumbnail, picture, GetSourceRectangle(_thumbnail, picture), GraphicsUnit.Pixel);
+
+        // Only the scaling wants the half pixel offset, and it has to be handed back
+        // right away: the mode stays on the Graphics, and at HighQuality every later
+        // coordinate shifts half a pixel towards the origin. That moves the left and
+        // top edges of a one pixel DrawRectangle onto column -1, outside the control,
+        // where they are clipped away - which is how the hover frame and the focus
+        // rectangle ended up drawing two sides instead of four.
+        g.PixelOffsetMode = PixelOffsetMode.Default;
+        g.InterpolationMode = InterpolationMode.Default;
     }
 
     private void PaintFrame(Graphics g, ThemePalette palette, Rectangle picture)

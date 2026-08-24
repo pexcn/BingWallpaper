@@ -108,4 +108,4 @@ PinnedWallpaper=          ; 锁定的壁纸文件名，留空表示跟随检查�
 
 ## 许可证
 
-[GPL-3.0-or-later](LICENSE).
+[GPL-3.0-or-later](LICENSE)
