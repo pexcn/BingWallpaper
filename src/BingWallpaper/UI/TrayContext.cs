@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -466,6 +467,18 @@ internal sealed class TrayContext : ApplicationContext
             // arbitrary point within the hour.
             _timer.Stop();
             _timer.Start();
+
+            if (HasTodaysMetadata())
+            {
+                // The list already names today's picture, so fetching it again could
+                // only return the same entry. Applying it straight from the cache
+                // keeps releasing a pin off the network entirely. Skipping the
+                // refresh also skips its cleanup pass, which is what would drop the
+                // file that just lost its protection - the next cycle does that.
+                _ = MoveToAsync(0, pinAfterwards: false);
+                return;
+            }
+
             StartRefresh(userInitiated: true);
             return;
         }
@@ -477,6 +490,19 @@ internal sealed class TrayContext : ApplicationContext
 
         SetPinned(Path.GetFileName(_appliedPath));
     }
+
+    /// <summary>
+    /// Whether the newest entry in <see cref="_images"/> is dated today, meaning a
+    /// metadata request cannot turn up anything newer. Compared in local time because
+    /// that is the clock the timer runs on; a market that has already rolled over (or
+    /// not yet) merely fails the test and costs a request nobody notices.
+    /// </summary>
+    private bool HasTodaysMetadata()
+        => _images.Count > 0
+           && string.Equals(
+               _images[0].StartDate,
+               DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture),
+               StringComparison.Ordinal);
 
     /// <summary>Moves inside the 8 day window: -1 goes newer, +1 goes older.</summary>
     private void MoveBy(int delta)
