@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -222,10 +223,29 @@ internal sealed class HistoryForm : Form
         }
     }
 
+    /// <summary>
+    /// Identifies what the grid is currently showing, so re-opening the window does not
+    /// re-download every thumbnail. Dates alone are not enough: two markets serve the
+    /// same eight days with different photos and different titles, and a signature built
+    /// from the range only would call that unchanged and leave the old market on screen.
+    /// </summary>
     private static string BuildSignature(IReadOnlyList<BingImageInfo> images)
-        => images.Count == 0
-            ? string.Empty
-            : images.Count + ":" + images[0].StartDate + ":" + images[images.Count - 1].StartDate;
+    {
+        if (images.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder builder = new StringBuilder(images.Count * 48);
+        foreach (BingImageInfo image in images)
+        {
+            builder.Append(image.StartDate).Append('|')
+                .Append(image.ImageId).Append('|')
+                .Append(image.Title).Append('\n');
+        }
+
+        return builder.ToString();
+    }
 
     private void Populate(IReadOnlyList<BingImageInfo> images)
     {
