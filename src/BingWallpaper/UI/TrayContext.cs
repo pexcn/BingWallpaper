@@ -48,6 +48,23 @@ internal sealed class TrayContext : ApplicationContext
     private SettingsForm? _settingsForm;
     private HistoryForm? _historyForm;
     private bool _busy;
+
+    /// <summary>
+    /// Set when a trigger arrives while a refresh is running, which is what the mouse
+    /// wheel over the market drop down produces: SelectedIndexChanged fires once per
+    /// entry it passes over. These used to be dropped, so the first entry won and the
+    /// one the user stopped on was lost - the INI named one market while the desktop
+    /// showed a picture from another.
+    ///
+    /// <para>
+    /// One flag rather than a queue, because a queue would have nothing useful in it:
+    /// the next pass reads <see cref="AppConfig.Market"/> again, so a single rerun ends
+    /// on whatever the selection settled on no matter how many triggers it collapsed.
+    /// </para>
+    /// </summary>
+    private bool _rerunRequested;
+    private bool _rerunUserInitiated;
+
     private bool _disposed;
 
     public TrayContext(AppConfig config)
@@ -212,6 +229,7 @@ internal sealed class TrayContext : ApplicationContext
         {
             _disposed = true;
             ThemeManager.ThemeChanged -= OnThemeChanged;
+
             try
             {
                 _shutdown.Cancel();
@@ -250,16 +268,50 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
-    private void StartRefresh(bool userInitiated) => _ = RefreshAsync(userInitiated);
-
-    private async Task RefreshAsync(bool userInitiated)
+    /// <summary>
+    /// Asks for a refresh. A trigger that arrives while one is running is remembered
+    /// rather than dropped, and acted on once the running one is done.
+    /// </summary>
+    private void StartRefresh(bool userInitiated)
     {
         if (_busy)
         {
-            Logger.Info("A refresh is already running, skipping this trigger.");
+            Logger.Info("A refresh is already running, queuing one more pass.");
+            _rerunRequested = true;
+
+            // Kept if any of the collapsed triggers was the user's: it decides whether
+            // a failure is reported in a dialog, and losing that to a timer tick would
+            // silence an error someone is waiting to hear about.
+            _rerunUserInitiated |= userInitiated;
             return;
         }
 
+        _ = RefreshAsync(userInitiated);
+    }
+
+    private async Task RefreshAsync(bool userInitiated)
+    {
+        // A loop rather than a recursive call at the end: a burst of triggers chains one
+        // pass after another, and recursion would leave every one of their state machines
+        // alive on the heap until the innermost returns.
+        while (true)
+        {
+            await RunRefreshPassAsync(userInitiated).ConfigureAwait(true);
+
+            if (!_rerunRequested || _disposed || _shutdown.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _rerunRequested = false;
+            userInitiated = _rerunUserInitiated;
+            _rerunUserInitiated = false;
+            Logger.Info("Running the queued refresh pass.");
+        }
+    }
+
+    private async Task RunRefreshPassAsync(bool userInitiated)
+    {
         _busy = true;
         UpdateMenuState();
         try
