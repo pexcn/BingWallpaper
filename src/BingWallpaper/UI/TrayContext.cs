@@ -765,17 +765,12 @@ internal sealed class TrayContext : ApplicationContext
         {
             case SettingKind.Market:
             case SettingKind.Resolution:
-                if (e.Kind == SettingKind.Resolution)
-                {
-                    // The resolution is part of the cache file name, so the pinned name
-                    // now points at a file that is no longer the one to use. A market
-                    // does not invalidate the pin the same way: it is the channel the
-                    // metadata comes through, not a property of the photo on the
-                    // desktop, so releasing the lock there only undid what the user had
-                    // just asked for.
-                    SetPinned(null);
-                }
-
+                // Neither releases the pin. What was locked is a photo; a market is only
+                // the channel its metadata arrives through and a resolution only how
+                // large a copy is kept, so releasing the lock for either undid what the
+                // user had just asked for. A pinned desktop stays as it is until the
+                // lock is lifted - EnsurePinnedAsync, not this, decides what happens to
+                // it from here.
                 _appliedPath = null;
                 _appliedImage = null;
                 _currentIndex = 0;
