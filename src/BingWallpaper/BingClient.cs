@@ -77,9 +77,13 @@ internal sealed class BingClient : IDisposable
     {
         int safeIdx = Clamp(idx, 0, MaxImageCount - 1);
         int safeCount = Clamp(count, 1, MaxImageCount);
+
+        // No ensearch=1. That flag forces the English channel, which makes setmkt
+        // decorative: zh-CN then answers with the en-US titles and the en-US picture
+        // set, so the market a user picked had no effect on anything they could see.
         string url = string.Format(
             CultureInfo.InvariantCulture,
-            "{0}?format=js&idx={1}&n={2}&uhd=1&setmkt={3}&ensearch=1",
+            "{0}?format=js&idx={1}&n={2}&uhd=1&setmkt={3}",
             ApiBase,
             safeIdx,
             safeCount,
