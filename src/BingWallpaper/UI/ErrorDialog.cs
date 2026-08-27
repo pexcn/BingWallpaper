@@ -91,7 +91,7 @@ internal static class ErrorDialog
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn("Could not copy the error text to the clipboard: " + ex.Message);
+                    Logger.Warn("errordialog: copying to the clipboard failed error=" + ex.Message);
                 }
             };
 
@@ -101,7 +101,7 @@ internal static class ErrorDialog
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not show the error dialog.", ex);
+            Logger.Error("errordialog: showing the dialog failed", ex);
             try
             {
                 MessageBox.Show(details, title, MessageBoxButtons.OK, MessageBoxIcon.Error);

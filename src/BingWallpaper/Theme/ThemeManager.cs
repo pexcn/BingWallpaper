@@ -45,7 +45,7 @@ internal static class ThemeManager
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not read the system theme preference: " + ex.Message);
+            Logger.Warn("theme: reading the system preference failed error=" + ex.Message);
         }
 
         return false;
@@ -57,7 +57,7 @@ internal static class ThemeManager
         Mode = mode;
         Palette = ThemePalette.For(Resolve(mode));
         DarkModeNative.SetAppMode(Palette.IsDark);
-        Logger.Info("Theme initialized: mode=" + mode + " effective=" + (Palette.IsDark ? "Dark" : "Light"));
+        Logger.Info("theme: initialized mode=" + mode + " effective=" + (Palette.IsDark ? "Dark" : "Light"));
     }
 
     /// <summary>Switches the mode and repaints all registered windows.</summary>
@@ -71,13 +71,13 @@ internal static class ThemeManager
         // color, so repainting there would just flash every window for nothing.
         if (dark == Palette.IsDark)
         {
-            Logger.Info("Theme mode is now " + mode + ", effective palette unchanged.");
+            Logger.Debug("theme: mode=" + mode + " effective palette unchanged");
             return;
         }
 
         Palette = ThemePalette.For(dark);
         DarkModeNative.SetAppMode(dark);
-        Logger.Info("Theme changed: mode=" + mode + " effective=" + (dark ? "Dark" : "Light"));
+        Logger.Info("theme: changed mode=" + mode + " effective=" + (dark ? "Dark" : "Light"));
         ThemeChanged?.Invoke(null, EventArgs.Empty);
     }
 
@@ -100,7 +100,7 @@ internal static class ThemeManager
 
         Palette = ThemePalette.For(dark);
         DarkModeNative.SetAppMode(dark);
-        Logger.Info("System theme changed, now " + (dark ? "Dark" : "Light") + ".");
+        Logger.Info("theme: system changed effective=" + (dark ? "Dark" : "Light"));
         ThemeChanged?.Invoke(null, EventArgs.Empty);
     }
 
@@ -128,7 +128,7 @@ internal static class ThemeManager
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not apply the system UI font: " + ex.Message);
+            Logger.Warn("theme: applying the system ui font failed error=" + ex.Message);
         }
     }
 

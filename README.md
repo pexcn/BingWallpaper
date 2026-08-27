@@ -47,6 +47,7 @@ Theme=System              ; 界面主题: System / Light / Dark
 RefreshIntervalHours=1    ; 检查间隔: 1 ~ 168 小时
 KeepDays=30               ; 壁纸保留天数: 0 表示永久保留，上限为 3650
 RunAtStartup=false        ; 开机自启动: true 或 false
+LogLevel=Info             ; 日志级别: Debug / Info / Warn / Error
 PinnedWallpaper=          ; 锁定的壁纸文件名，留空表示跟随检查间隔自动更换
 ```
 

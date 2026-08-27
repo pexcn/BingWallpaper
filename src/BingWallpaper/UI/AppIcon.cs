@@ -44,7 +44,7 @@ internal static class AppIcon
             using Stream? stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(ResourceName);
             if (stream is null)
             {
-                Logger.Warn("The application icon is not embedded in the assembly: " + ResourceName);
+                Logger.Warn("appicon: resource not embedded name=" + ResourceName);
                 return null;
             }
 
@@ -52,7 +52,7 @@ internal static class AppIcon
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not read the embedded application icon: " + ex.Message);
+            Logger.Warn("appicon: reading the embedded resource failed error=" + ex.Message);
             return null;
         }
     }
@@ -72,7 +72,7 @@ internal static class AppIcon
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not pick the " + size.Width + "px frame of the application icon: " + ex.Message);
+            Logger.Warn("appicon: picking a frame failed size=" + size.Width + " error=" + ex.Message);
             return source;
         }
     }
@@ -93,7 +93,7 @@ internal static class AppIcon
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not extract the application icon: " + ex.Message);
+            Logger.Warn("appicon: extracting the icon failed error=" + ex.Message);
         }
 
         return SystemIcons.Application;

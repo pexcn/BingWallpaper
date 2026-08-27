@@ -89,7 +89,7 @@ internal sealed class BingClient : IDisposable
             safeCount,
             Uri.EscapeDataString(market));
 
-        Logger.Info("API request: " + url);
+        Logger.Info("api: request url=" + url);
 
         string json = await RunWithRetryAsync(
             async () =>
@@ -98,7 +98,7 @@ internal sealed class BingClient : IDisposable
                     .GetAsync(url, HttpCompletionOption.ResponseContentRead, cancellationToken)
                     .ConfigureAwait(false))
                 {
-                    Logger.Info("API response: HTTP " + (int)response.StatusCode + " " + response.StatusCode);
+                    Logger.Debug("api: response status=" + (int)response.StatusCode + " " + response.StatusCode);
                     response.EnsureSuccessStatusCode();
                     return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                 }
@@ -107,20 +107,30 @@ internal sealed class BingClient : IDisposable
             cancellationToken).ConfigureAwait(false);
 
         List<BingImageInfo> images = ParseImages(json);
-        Logger.Info("API returned " + images.Count + " image(s).");
+
+        // One Info line per response; the per-image breakdown is Debug because eight
+        // titles on every refresh cycle would dominate the rotation window.
+        Logger.Info(
+            "api: images=" + images.Count +
+            " latest=" + (images.Count > 0 ? images[0].StartDate : "none"));
+
+        bool debug = Logger.IsEnabled(LogLevel.Debug);
         foreach (BingImageInfo image in images)
         {
-            Logger.Info(
-                "  startdate=" + image.StartDate +
-                " fullstartdate=" + image.FullStartDate +
-                " wp=" + image.Wp +
-                " title=" + image.DisplayTitle);
+            if (debug)
+            {
+                Logger.Debug(
+                    "api: image startdate=" + image.StartDate +
+                    " fullstartdate=" + image.FullStartDate +
+                    " wp=" + image.Wp +
+                    " title=" + image.DisplayTitle);
+            }
 
             if (!image.Wp)
             {
-                Logger.Warn(
-                    "Image " + image.StartDate + " is flagged wp=false (Bing does not mark it as " +
-                    "downloadable wallpaper). Continuing anyway - this is a personal tool.");
+                // Bing does not mark this one as a downloadable wallpaper. Used anyway:
+                // this is a personal tool and the flag has been wrong before.
+                Logger.Warn("api: image not flagged as wallpaper startdate=" + image.StartDate + " wp=false");
             }
         }
 
@@ -156,7 +166,7 @@ internal sealed class BingClient : IDisposable
             string startDate = GetString(entry, "startdate");
             if (string.IsNullOrEmpty(urlBase) || string.IsNullOrEmpty(startDate))
             {
-                Logger.Warn("Skipping response entry without urlbase/startdate.");
+                Logger.Warn("api: skipping entry without urlbase/startdate");
                 continue;
             }
 
@@ -192,8 +202,7 @@ internal sealed class BingClient : IDisposable
         CancellationToken cancellationToken)
     {
         string tempPath = destinationPath + ".tmp";
-        Logger.Info("Downloading " + url);
-        Logger.Info("  target: " + destinationPath);
+        Logger.Debug("download: start url=" + url + " target=" + destinationPath);
 
         long bytes = await RunWithRetryAsync(
             async () =>
@@ -205,7 +214,7 @@ internal sealed class BingClient : IDisposable
                     .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                     .ConfigureAwait(false))
                 {
-                    Logger.Info("  HTTP " + (int)response.StatusCode + " " + response.StatusCode);
+                    Logger.Debug("download: response status=" + (int)response.StatusCode + " " + response.StatusCode);
                     response.EnsureSuccessStatusCode();
 
                     using (Stream source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
@@ -233,9 +242,15 @@ internal sealed class BingClient : IDisposable
                     throw new InvalidDataException("Downloaded file is not a decodable image: " + error);
                 }
 
+                // Single Info line for the whole transfer: the url, the target and the
+                // outcome belong together, and separate lines drift apart once other
+                // threads interleave.
                 Logger.Info(
-                    "  downloaded " + length + " bytes in " + stopwatch.ElapsedMilliseconds +
-                    " ms, decoded " + width + "x" + height);
+                    "download: done url=" + url +
+                    " target=" + destinationPath +
+                    " bytes=" + length +
+                    " ms=" + stopwatch.ElapsedMilliseconds +
+                    " decoded=" + width + "x" + height);
 
                 Paths.MoveOverwrite(tempPath, destinationPath);
                 return length;
@@ -427,8 +442,9 @@ internal sealed class BingClient : IDisposable
 
                 TimeSpan delay = RetryDelays[attempt];
                 Logger.Warn(
-                    "Attempt " + (attempt + 1) + " to " + what + " failed (" + ex.GetType().Name + ": " +
-                    ex.Message + "). Retrying in " + delay.TotalSeconds + "s.");
+                    "retry: op=\"" + what + "\" attempt=" + (attempt + 1) +
+                    " error=" + ex.GetType().Name + ": " + ex.Message +
+                    " retryin=" + delay.TotalSeconds + "s");
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -472,7 +488,7 @@ internal sealed class BingClient : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not delete " + path + ": " + ex.Message);
+            Logger.Warn("cleanup: delete failed path=" + path + " error=" + ex.Message);
         }
     }
 }

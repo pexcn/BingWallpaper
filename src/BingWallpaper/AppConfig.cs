@@ -60,6 +60,13 @@ internal sealed class AppConfig
     public bool RunAtStartup { get; set; }
 
     /// <summary>
+    /// Lowest level written to the log file. Not exposed in the settings UI: turning
+    /// on Debug is a troubleshooting step, and the extra platform probing lines burn
+    /// through the rotation window fast enough that it should not be left on.
+    /// </summary>
+    public LogLevel LogLevel { get; set; } = LogLevel.Info;
+
+    /// <summary>
     /// File name of the wallpaper the user pinned, or an empty string when the
     /// wallpaper follows the refresh timer. Deliberately a bare file name and not a
     /// path: the picture keeps its identity wherever the wallpaper folder ends up
@@ -93,6 +100,7 @@ internal sealed class AppConfig
             MaxRefreshIntervalHours);
         config.KeepDays = Clamp(GetInt(values, "KeepDays", 30), 0, MaxKeepDays);
         config.RunAtStartup = GetBool(values, "RunAtStartup", false);
+        config.LogLevel = ParseEnum(GetString(values, "LogLevel", "Info"), LogLevel.Info);
         config.PinnedWallpaper = SanitizeFileName(GetString(values, "PinnedWallpaper", string.Empty));
         return config;
     }
@@ -108,6 +116,7 @@ internal sealed class AppConfig
         sb.AppendLine("RefreshIntervalHours=" + RefreshIntervalHours.ToString(CultureInfo.InvariantCulture));
         sb.AppendLine("KeepDays=" + KeepDays.ToString(CultureInfo.InvariantCulture));
         sb.AppendLine("RunAtStartup=" + (RunAtStartup ? "true" : "false"));
+        sb.AppendLine("LogLevel=" + LogLevel);
         sb.AppendLine("PinnedWallpaper=" + PinnedWallpaper);
 
         string tmp = path + ".tmp";
@@ -167,7 +176,7 @@ internal sealed class AppConfig
             // Falls through to the warning below.
         }
 
-        Logger.Warn("Ignoring PinnedWallpaper, it is not a plain file name: " + trimmed);
+        Logger.Warn("config: ignoring pinnedwallpaper, not a plain file name value=" + trimmed);
         return string.Empty;
     }
 
@@ -216,7 +225,7 @@ internal sealed class AppConfig
         }
         catch (Exception ex)
         {
-            Logger.Error("Failed to read configuration file: " + path, ex);
+            Logger.Error("config: read failed path=" + path, ex);
         }
 
         return values;

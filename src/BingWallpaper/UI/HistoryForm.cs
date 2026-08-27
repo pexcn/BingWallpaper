@@ -215,7 +215,7 @@ internal sealed class HistoryForm : Form
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not load the wallpaper history.", ex);
+            Logger.Error("history: loading the wallpaper list failed", ex);
             if (!IsDisposed)
             {
                 SetStatus("获取壁纸列表失败，详见日志文件。");
@@ -372,7 +372,7 @@ internal sealed class HistoryForm : Form
             }
             catch (Exception ex)
             {
-                Logger.Warn("Could not load the thumbnail for " + image.StartDate + ": " + ex.Message);
+                Logger.Warn("history: thumbnail load failed startdate=" + image.StartDate + " error=" + ex.Message);
             }
         }
     }
@@ -454,7 +454,7 @@ internal sealed class HistoryForm : Form
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not apply the selected wallpaper.", ex);
+            Logger.Error("history: applying the selected wallpaper failed", ex);
             SetStatus("应用失败，详见日志文件。");
         }
         finally

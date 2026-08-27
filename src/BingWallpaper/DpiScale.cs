@@ -33,7 +33,7 @@ internal static class DpiScale
             }
             catch (Exception ex)
             {
-                Logger.Warn("Could not read the desktop DPI: " + ex.Message);
+                Logger.Warn("dpi: reading the desktop dpi failed error=" + ex.Message);
             }
         }
 

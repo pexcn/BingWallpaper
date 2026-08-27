@@ -22,7 +22,7 @@ internal static class WallpaperService
     {
         if (!File.Exists(imagePath))
         {
-            Logger.Error("Cannot apply wallpaper, file does not exist: " + imagePath);
+            Logger.Error("wallpaper: apply skipped, file missing path=" + imagePath);
             return false;
         }
 
@@ -43,11 +43,11 @@ internal static class WallpaperService
                 key.SetValue("TileWallpaper", tile, RegistryValueKind.String);
             }
 
-            Logger.Info("Wallpaper style set: fit=" + fit + " WallpaperStyle=" + style + " TileWallpaper=" + tile);
+            Logger.Debug("wallpaper: style set fit=" + fit + " wallpaperstyle=" + style + " tilewallpaper=" + tile);
         }
         catch (Exception ex)
         {
-            Logger.Error("Failed to write wallpaper style values.", ex);
+            Logger.Error("wallpaper: writing style values failed", ex);
             return false;
         }
 
@@ -61,8 +61,10 @@ internal static class WallpaperService
 
         int lastError = Marshal.GetLastWin32Error();
         Logger.Info(
-            "SystemParametersInfoW(SPI_SETDESKWALLPAPER) returned " + ok +
-            (ok ? string.Empty : " lastError=" + lastError) + " path=" + fullPath);
+            "wallpaper: applied ok=" + ok +
+            " fit=" + fit +
+            " path=" + fullPath +
+            (ok ? string.Empty : " lasterror=" + lastError));
 
         return ok;
     }
@@ -79,7 +81,7 @@ internal static class WallpaperService
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not read the current wallpaper path: " + ex.Message);
+            Logger.Warn("wallpaper: reading the current path failed error=" + ex.Message);
             return null;
         }
     }
@@ -93,7 +95,7 @@ internal static class WallpaperService
     {
         if (keepDays <= 0)
         {
-            Logger.Info("Retention is set to keep forever, skipping cleanup.");
+            Logger.Debug("cleanup: skipped, retention=forever");
             return 0;
         }
 
@@ -126,22 +128,31 @@ internal static class WallpaperService
 
                     info.Delete();
                     deleted++;
-                    Logger.Info("Deleted expired wallpaper: " + info.Name);
+                    Logger.Info("cleanup: deleted expired file=" + info.Name);
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn("Could not delete " + full + ": " + ex.Message);
+                    Logger.Warn("cleanup: delete failed path=" + full + " error=" + ex.Message);
                 }
             }
         }
         catch (Exception ex)
         {
-            Logger.Error("Cleanup pass failed.", ex);
+            Logger.Error("cleanup: pass failed", ex);
         }
 
-        Logger.Info(
-            "Cleanup finished: " + deleted.ToString(CultureInfo.InvariantCulture) +
-            " file(s) removed (keepDays=" + keepDays + ").");
+        // Debug when nothing happened: on a settled cache this fires on every cycle.
+        string summary = "cleanup: done removed=" + deleted.ToString(CultureInfo.InvariantCulture) +
+            " keepdays=" + keepDays.ToString(CultureInfo.InvariantCulture);
+        if (deleted > 0)
+        {
+            Logger.Info(summary);
+        }
+        else
+        {
+            Logger.Debug(summary);
+        }
+
         return deleted;
     }
 
@@ -227,25 +238,25 @@ internal static class WallpaperService
                     {
                         File.Delete(full);
                         deleted++;
-                        Logger.Info("Deleted redundant resolution: " + Path.GetFileName(full));
+                        Logger.Info("staleresolution: deleted file=" + Path.GetFileName(full));
                     }
                     catch (Exception ex)
                     {
-                        Logger.Warn("Could not delete " + full + ": " + ex.Message);
+                        Logger.Warn("staleresolution: delete failed path=" + full + " error=" + ex.Message);
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            Logger.Error("Stale resolution pass failed.", ex);
+            Logger.Error("staleresolution: pass failed", ex);
         }
 
         if (deleted > 0)
         {
             Logger.Info(
-                "Stale resolution pass finished: " + deleted.ToString(CultureInfo.InvariantCulture) +
-                " file(s) removed (keeping " + AppConfig.ResolutionToString(resolution) + ").");
+                "staleresolution: done removed=" + deleted.ToString(CultureInfo.InvariantCulture) +
+                " keeping=" + AppConfig.ResolutionToString(resolution));
         }
 
         return deleted;
@@ -303,7 +314,7 @@ internal static class WallpaperService
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not normalize the protected wallpaper path: " + ex.Message);
+            Logger.Warn("cleanup: normalizing a protected path failed error=" + ex.Message);
             return null;
         }
     }

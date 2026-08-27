@@ -33,14 +33,14 @@ internal static class Program
         string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
         bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
         Logger.Info(
-            "BingWallpaper " + version +
-            " | OS " + Environment.OSVersion.Version +
-            " (build " + Environment.OSVersion.Version.Build + ")" +
-            " | 64bit=" + Environment.Is64BitProcess +
-            " | DPI " + NativeMethods.GetSystemDpiSafe().ToString(CultureInfo.InvariantCulture) +
-            " | system theme " + (ThemeManager.IsSystemDark() ? "Dark" : "Light") +
-            " | dir " + Paths.BaseDirectory +
-            " | writable " + writable + (writable ? string.Empty : " (" + writeError + ")"));
+            "startup: version=" + version +
+            " os=" + Environment.OSVersion.Version +
+            " build=" + Environment.OSVersion.Version.Build +
+            " 64bit=" + Environment.Is64BitProcess +
+            " dpi=" + NativeMethods.GetSystemDpiSafe().ToString(CultureInfo.InvariantCulture) +
+            " systemtheme=" + (ThemeManager.IsSystemDark() ? "Dark" : "Light") +
+            " dir=" + Paths.BaseDirectory +
+            " writable=" + writable + (writable ? string.Empty : " writeerror=" + writeError));
     }
 
     private static int RunGui()
@@ -70,33 +70,38 @@ internal static class Program
         }
 
         Logger.Initialize(Paths.LogFile);
+
+        // The only decorative line in the log, and only because a process boundary is
+        // what you look for first when a log spans several runs.
         Logger.Info("----------------------------------------------------------------");
         LogEnvironment();
 
         if (!TryBecomePrimaryInstance())
         {
-            Logger.Info("Another instance is already running; asked it to show its settings window.");
+            Logger.Info("startup: another instance is primary, asked it to show settings");
             return 0;
         }
 
         try
         {
             AppConfig config = AppConfig.Load(Paths.ConfigFile);
+            Logger.SetMinimumLevel(config.LogLevel);
             if (!File.Exists(Paths.ConfigFile))
             {
-                Logger.Info("No configuration file found, writing defaults to " + Paths.ConfigFile);
+                Logger.Info("config: no file found, writing defaults path=" + Paths.ConfigFile);
                 config.Save(Paths.ConfigFile);
             }
 
             Logger.Info(
-                "Configuration: market=" + config.Market +
+                "config: market=" + config.Market +
                 " resolution=" + AppConfig.ResolutionToString(config.Resolution) +
                 " fit=" + config.Fit +
                 " theme=" + config.Theme +
                 " interval=" + config.RefreshIntervalHours + "h" +
-                " keepDays=" + config.KeepDays +
-                " runAtStartup=" + config.RunAtStartup +
-                " pinned=" + (config.IsPinned ? config.PinnedWallpaper : "no"));
+                " keepdays=" + config.KeepDays +
+                " runatstartup=" + config.RunAtStartup +
+                " loglevel=" + config.LogLevel +
+                " pinned=" + (config.IsPinned ? config.PinnedWallpaper : "none"));
 
             ThemeManager.Initialize(config.Theme);
 
@@ -108,12 +113,12 @@ internal static class Program
             _trayContext = new TrayContext(config);
             StartActivationListener();
             Application.Run(_trayContext);
-            Logger.Info("Message loop finished, exiting.");
+            Logger.Info("shutdown: message loop finished");
             return 0;
         }
         catch (Exception ex)
         {
-            Logger.Error("Fatal error during startup.", ex);
+            Logger.Error("startup: fatal error", ex);
             ErrorDialog.Show("启动失败", Logger.Describe(ex));
             return 1;
         }
@@ -148,19 +153,19 @@ internal static class Program
                     false,
                     EventResetMode.AutoReset,
                     prefix + ActivateObject);
-                Logger.Debug("Single instance guard uses the " + prefix.TrimEnd('\\') + " namespace.");
+                Logger.Debug("singleinstance: namespace=" + prefix.TrimEnd('\\'));
                 return true;
             }
             catch (Exception ex)
             {
                 Logger.Warn(
-                    "Could not create the single instance objects in the " + prefix.TrimEnd('\\') +
-                    " namespace: " + ex.GetType().Name + ": " + ex.Message);
+                    "singleinstance: create failed namespace=" + prefix.TrimEnd('\\') +
+                    " error=" + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
         // Fail open: running without the guard is better than not running at all.
-        Logger.Warn("Continuing without a single instance guard.");
+        Logger.Warn("singleinstance: continuing without a guard");
         return true;
     }
 
@@ -179,7 +184,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not signal the running instance: " + ex.Message);
+            Logger.Warn("singleinstance: signalling the running instance failed error=" + ex.Message);
         }
     }
 
@@ -208,7 +213,7 @@ internal static class Program
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn("Activation listener error: " + ex.Message);
+                    Logger.Warn("singleinstance: activation listener stopped error=" + ex.Message);
                     return;
                 }
             }
@@ -234,26 +239,26 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Logger.Debug("Releasing the single instance objects failed: " + ex.Message);
+            Logger.Debug("singleinstance: release failed error=" + ex.Message);
         }
     }
 
     private static void OnThreadException(object sender, ThreadExceptionEventArgs e)
     {
-        Logger.Error("Unhandled UI thread exception.", e.Exception);
+        Logger.Error("crash: unhandled ui thread exception", e.Exception);
         ErrorDialog.Show("未处理的异常", Logger.Describe(e.Exception));
     }
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
         Exception? ex = e.ExceptionObject as Exception;
-        Logger.Error("Unhandled AppDomain exception (terminating=" + e.IsTerminating + ").", ex ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown"));
+        Logger.Error("crash: unhandled appdomain exception terminating=" + e.IsTerminating, ex ?? new Exception(e.ExceptionObject?.ToString() ?? "unknown"));
         ErrorDialog.Show("未处理的异常", Logger.Describe(ex));
     }
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        Logger.Error("Unobserved task exception.", e.Exception);
+        Logger.Error("crash: unobserved task exception", e.Exception);
         e.SetObserved();
     }
 

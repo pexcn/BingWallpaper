@@ -122,7 +122,7 @@ internal static class NativeMethods
         }
         catch (Exception ex)
         {
-            Logger.Warn("GetDpiForSystem failed: " + ex.Message);
+            Logger.Warn("dpi: getdpiforsystem failed error=" + ex.Message);
             return 96u;
         }
     }

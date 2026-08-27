@@ -94,13 +94,15 @@ internal static class DarkModeNative
             SetPreferredAppMode(mode);
             RefreshImmersiveColorPolicyState();
             FlushMenuThemes();
-            Logger.Debug("SetPreferredAppMode(" + mode + ") applied.");
+            Logger.Debug("darkmode: setpreferredappmode applied mode=" + mode);
         }
         catch (Exception ex)
         {
             _appModeFailed = true;
+            // Warn rather than Debug: this one is process wide, so the whole app falls
+            // back to managed colours. The per-window helpers below only lose a detail.
             Logger.Warn(
-                "Undocumented uxtheme dark mode API unavailable, falling back to managed colours only: " +
+                "darkmode: uxtheme api unavailable, using managed colours only error=" +
                 ex.GetType().Name + ": " + ex.Message);
         }
     }
@@ -119,7 +121,7 @@ internal static class DarkModeNative
         }
         catch (Exception ex)
         {
-            Logger.Debug("AllowDarkModeForWindow failed: " + ex.Message);
+            Logger.Debug("darkmode: allowdarkmodeforwindow failed error=" + ex.Message);
         }
     }
 
@@ -137,12 +139,12 @@ internal static class DarkModeNative
             int hr = DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref value, sizeof(int));
             if (hr != 0)
             {
-                Logger.Debug("DwmSetWindowAttribute(20) returned HRESULT 0x" + hr.ToString("X8"));
+                Logger.Debug("darkmode: dwmsetwindowattribute hresult=0x" + hr.ToString("X8"));
             }
         }
         catch (Exception ex)
         {
-            Logger.Warn("DwmSetWindowAttribute failed: " + ex.Message);
+            Logger.Debug("darkmode: dwmsetwindowattribute failed error=" + ex.Message);
         }
     }
 
@@ -164,7 +166,7 @@ internal static class DarkModeNative
         }
         catch (Exception ex)
         {
-            Logger.Debug("SetWindowTheme failed: " + ex.Message);
+            Logger.Debug("darkmode: setwindowtheme failed error=" + ex.Message);
         }
     }
 
@@ -178,7 +180,7 @@ internal static class DarkModeNative
         }
         catch (Exception ex)
         {
-            Logger.Debug("SetPreferredAppMode(AllowDark) failed: " + ex.Message);
+            Logger.Debug("darkmode: setpreferredappmode(allowdark) failed error=" + ex.Message);
         }
     }
 }

@@ -157,7 +157,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not activate the settings window: " + ex.Message);
+            Logger.Warn("settings: activating the window failed error=" + ex.Message);
         }
     }
 
@@ -192,7 +192,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (index < 0 || index >= _images.Count)
         {
-            Logger.Warn("Requested image index " + index + " is out of range (" + _images.Count + " entries).");
+            Logger.Warn("apply: index out of range index=" + index + " count=" + _images.Count);
             return;
         }
 
@@ -205,7 +205,7 @@ internal sealed class TrayContext : ApplicationContext
         bool cached = File.Exists(path) && new FileInfo(path).Length > 0;
         if (cached)
         {
-            Logger.Info("Cache hit: " + path);
+            Logger.Debug("apply: cache hit path=" + path);
         }
         else
         {
@@ -216,7 +216,7 @@ internal sealed class TrayContext : ApplicationContext
 
         if (!force && cached && IsCurrentWallpaper(path))
         {
-            Logger.Info("Wallpaper is already up to date, nothing to do.");
+            Logger.Info("apply: already up to date path=" + path);
         }
         else
         {
@@ -242,7 +242,7 @@ internal sealed class TrayContext : ApplicationContext
             }
             catch (Exception ex)
             {
-                Logger.Debug("Cancelling background work failed: " + ex.Message);
+                Logger.Debug("shutdown: cancelling background work failed error=" + ex.Message);
             }
 
             _timer.Stop();
@@ -282,7 +282,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (_busy)
         {
-            Logger.Info("A refresh is already running, queuing one more pass.");
+            Logger.Info("refresh: already running, queued one more pass");
             _rerunRequested = true;
 
             // Kept if any of the collapsed triggers was the user's: it decides whether
@@ -312,7 +312,7 @@ internal sealed class TrayContext : ApplicationContext
             _rerunRequested = false;
             userInitiated = _rerunUserInitiated;
             _rerunUserInitiated = false;
-            Logger.Info("Running the queued refresh pass.");
+            Logger.Info("refresh: running the queued pass");
         }
     }
 
@@ -322,7 +322,7 @@ internal sealed class TrayContext : ApplicationContext
         UpdateMenuState();
         try
         {
-            Logger.Info("=== refresh cycle start (userInitiated=" + userInitiated + ") ===");
+            Logger.Info("refresh: start userinitiated=" + userInitiated);
             List<BingImageInfo> images = await _client
                 .FetchAsync(_config.Market, 0, BingClient.MaxImageCount, _shutdown.Token)
                 .ConfigureAwait(true);
@@ -344,15 +344,15 @@ internal sealed class TrayContext : ApplicationContext
                 Paths.WallpaperDirectory,
                 _config.Resolution,
                 BuildProtectedFiles());
-            Logger.Info("=== refresh cycle done ===");
+            Logger.Info("refresh: done");
         }
         catch (OperationCanceledException)
         {
-            Logger.Info("Refresh cancelled (application is shutting down).");
+            Logger.Info("refresh: cancelled, application is shutting down");
         }
         catch (Exception ex)
         {
-            Logger.Error("Refresh cycle failed.", ex);
+            Logger.Error("refresh: cycle failed", ex);
             _titleItem.Text = "刷新失败，详见日志文件";
             if (userInitiated)
             {
@@ -385,7 +385,7 @@ internal sealed class TrayContext : ApplicationContext
         {
             // It may still be downloadable; EnsurePinnedAsync decides once the
             // metadata is in.
-            Logger.Warn("The pinned wallpaper is not in the cache: " + _config.PinnedWallpaper);
+            Logger.Warn("pin: not in the cache file=" + _config.PinnedWallpaper);
             _currentIndex = -1;
             UpdateMenuState();
             return;
@@ -395,7 +395,7 @@ internal sealed class TrayContext : ApplicationContext
         // way to ask is the registry value, and that answer is not reliable enough to
         // skip on (see IsCurrentWallpaper). One SystemParametersInfoW call per start
         // is cheap, and applying a picture that is already there changes nothing.
-        Logger.Info("Restoring the pinned wallpaper: " + _config.PinnedWallpaper);
+        Logger.Info("pin: restoring file=" + _config.PinnedWallpaper);
         WallpaperService.Apply(path, _config.Fit);
 
         _appliedPath = path;
@@ -420,13 +420,13 @@ internal sealed class TrayContext : ApplicationContext
         {
             if (index < 0)
             {
-                Logger.Warn("The pinned wallpaper is gone and out of reach, releasing the pin: " + fileName);
+                Logger.Warn("pin: file gone and not downloadable, releasing the pin file=" + fileName);
                 SetPinned(null);
                 await ApplyIndexAsync(0, force: true).ConfigureAwait(true);
                 return;
             }
 
-            Logger.Info("The pinned wallpaper is missing, downloading it again: " + fileName);
+            Logger.Info("pin: file missing, downloading again file=" + fileName);
             await ApplyIndexAsync(index, force: true).ConfigureAwait(true);
             return;
         }
@@ -436,7 +436,7 @@ internal sealed class TrayContext : ApplicationContext
         _appliedPath = path;
         _currentIndex = index;
         _appliedImage = index >= 0 ? _images[index] : null;
-        Logger.Info("Wallpaper is pinned to " + fileName + ", leaving the desktop alone.");
+        Logger.Info("pin: active, desktop left alone file=" + fileName);
         UpdateMenuState();
     }
 
@@ -500,12 +500,12 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex)
         {
             _config.PinnedWallpaper = previous;
-            Logger.Error("Could not save the pinned wallpaper.", ex);
+            Logger.Error("pin: saving the configuration failed", ex);
             ErrorDialog.Show("保存设置失败", Logger.Describe(ex));
             return;
         }
 
-        Logger.Info(value.Length == 0 ? "Wallpaper pin released." : "Wallpaper pinned to " + value + ".");
+        Logger.Info(value.Length == 0 ? "pin: released" : "pin: set file=" + value);
         UpdateMenuState();
     }
 
@@ -610,11 +610,11 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (OperationCanceledException)
         {
-            Logger.Info("Wallpaper switch cancelled.");
+            Logger.Info("switch: cancelled");
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not switch the wallpaper.", ex);
+            Logger.Error("switch: failed", ex);
             ErrorDialog.Show("切换壁纸失败", Logger.Describe(ex));
         }
         finally
@@ -760,7 +760,7 @@ internal sealed class TrayContext : ApplicationContext
 
     private void OnSettingsChanged(object? sender, SettingsChangedEventArgs e)
     {
-        Logger.Info("Setting changed: " + e.Kind);
+        Logger.Info("settings: changed kind=" + e.Kind);
         switch (e.Kind)
         {
             case SettingKind.Market:
@@ -793,7 +793,7 @@ internal sealed class TrayContext : ApplicationContext
                 _timer.Stop();
                 _timer.Interval = GetIntervalMilliseconds();
                 _timer.Start();
-                Logger.Info("Refresh timer set to " + _config.RefreshIntervalHours + " hour(s).");
+                Logger.Debug("refresh: timer interval=" + _config.RefreshIntervalHours + "h");
                 break;
 
             case SettingKind.KeepDays:
@@ -823,7 +823,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not open the wallpaper folder.", ex);
+            Logger.Error("shell: opening the wallpaper folder failed", ex);
         }
     }
 
@@ -838,17 +838,17 @@ internal sealed class TrayContext : ApplicationContext
         try
         {
             Process.Start(new ProcessStartInfo(link) { UseShellExecute = true });
-            Logger.Info("Opened image source: " + link);
+            Logger.Info("shell: opened image source url=" + link);
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not open the image source link.", ex);
+            Logger.Error("shell: opening the image source failed", ex);
         }
     }
 
     private void ExitApplication()
     {
-        Logger.Info("Exit requested from the tray menu.");
+        Logger.Info("shutdown: exit requested from the tray menu");
         _tray.Visible = false;
         ExitThread();
     }
@@ -972,7 +972,7 @@ internal sealed class HiddenWindow : Form
             string? area = m.LParam != IntPtr.Zero ? Marshal.PtrToStringUni(m.LParam) : null;
             if (string.Equals(area, "ImmersiveColorSet", StringComparison.Ordinal))
             {
-                Logger.Debug("WM_SETTINGCHANGE/ImmersiveColorSet received.");
+                Logger.Debug("theme: WM_SETTINGCHANGE/ImmersiveColorSet received");
                 SystemColorSchemeChanged?.Invoke(this, EventArgs.Empty);
             }
         }

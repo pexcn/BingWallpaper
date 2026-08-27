@@ -28,6 +28,10 @@ internal static class Logger
     private static string? _filePath;
     private static bool _fileDisabled;
 
+    // Info by default: Debug carries platform probing details that would otherwise
+    // flood the 512 KiB rotation window and push out the startup banner.
+    private static LogLevel _minimumLevel = LogLevel.Info;
+
     /// <summary>Set once at startup; a null path disables file logging.</summary>
     public static void Initialize(string? filePath)
     {
@@ -35,6 +39,24 @@ internal static class Logger
         {
             _filePath = filePath;
             _fileDisabled = string.IsNullOrEmpty(filePath);
+        }
+    }
+
+    /// <summary>Lines below this level are dropped before any formatting happens.</summary>
+    public static void SetMinimumLevel(LogLevel level)
+    {
+        lock (Sync)
+        {
+            _minimumLevel = level;
+        }
+    }
+
+    /// <summary>Lets callers skip building expensive messages that would be dropped.</summary>
+    public static bool IsEnabled(LogLevel level)
+    {
+        lock (Sync)
+        {
+            return level >= _minimumLevel;
         }
     }
 
@@ -90,20 +112,20 @@ internal static class Logger
 
     private static void Write(LogLevel level, string message)
     {
-        string line = string.Format(
-            CultureInfo.InvariantCulture,
-            "{0:yyyy-MM-dd HH:mm:ss.fff} [{1,-5}] [{2,3}] {3}",
-            DateTime.Now,
-            level.ToString().ToUpperInvariant(),
-            Environment.CurrentManagedThreadId,
-            message);
-
         lock (Sync)
         {
-            if (_fileDisabled || _filePath is null)
+            if (level < _minimumLevel || _fileDisabled || _filePath is null)
             {
                 return;
             }
+
+            string line = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0:yyyy-MM-dd HH:mm:ss.fff} [{1,-5}] [{2,3}] {3}",
+                DateTime.Now,
+                level.ToString().ToUpperInvariant(),
+                Environment.CurrentManagedThreadId,
+                message);
 
             try
             {

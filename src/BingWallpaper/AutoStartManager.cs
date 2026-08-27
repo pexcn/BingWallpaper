@@ -29,7 +29,7 @@ internal static class AutoStartManager
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not read the Run registry key.", ex);
+            Logger.Error("autostart: reading the run key failed", ex);
             return null;
         }
     }
@@ -53,12 +53,12 @@ internal static class AutoStartManager
                 key.SetValue(ValueName, command, RegistryValueKind.String);
             }
 
-            Logger.Info("Auto start enabled: " + command);
+            Logger.Info("autostart: enabled command=" + command);
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not enable auto start.", ex);
+            Logger.Error("autostart: enable failed", ex);
             return false;
         }
     }
@@ -78,12 +78,12 @@ internal static class AutoStartManager
                 key.DeleteValue(ValueName, throwOnMissingValue: false);
             }
 
-            Logger.Info("Auto start disabled, Run value removed.");
+            Logger.Info("autostart: disabled, run value removed");
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Error("Could not disable auto start.", ex);
+            Logger.Error("autostart: disable failed", ex);
             return false;
         }
     }
@@ -103,7 +103,7 @@ internal static class AutoStartManager
         {
             if (current is not null)
             {
-                Logger.Info("Auto start is off in the configuration but the Run value exists - removing it.");
+                Logger.Info("autostart: config=off but run value present, removing it");
                 Disable();
             }
 
@@ -112,7 +112,7 @@ internal static class AutoStartManager
 
         if (current is null)
         {
-            Logger.Info("Auto start is on in the configuration but the Run value is missing - creating it.");
+            Logger.Info("autostart: config=on but run value missing, creating it");
             Enable();
             return;
         }
@@ -125,7 +125,7 @@ internal static class AutoStartManager
         }
 
         Logger.Info(
-            "Auto start path drifted, updating the Run value. old=\"" + current +
+            "autostart: path drifted, updating the run value old=\"" + current +
             "\" new=\"" + Paths.ExecutablePath + "\"");
         Enable();
     }

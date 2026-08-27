@@ -41,6 +41,23 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 什么条件下该改回去；平台怪癖和未文档化行为必须写清缘由。
 显而易见的赋值和转发不需要旁注，不要复述代码做了什么。
 
+## 日志
+
+消息体统一为 `<subject>: <说明> <key>=<value> ...`，subject 与 key 全小写，**行尾不加句号**。
+纯事件行（`refresh: start`、`shutdown: message loop finished`）允许没有 key=value。
+不要用缩进伪造层级 —— 每行都带独立时间戳和线程 ID，异步交错时缩进立刻失效；
+一次操作的多个字段合并成一行写完。分隔线只保留进程启动那一条 `----`。
+
+级别判据：
+
+- `Debug`：平台探测、未文档化调用的细节、逐条明细（默认不写盘）
+- `Info`：状态发生了改变
+- `Warn`：已降级但功能仍可用
+- `Error`：功能失败，用户可感知
+
+可预期的 IO/注册表失败只记 `ex.Message`；非预期失败走 `Logger.Error(context, ex)` 带完整异常链。
+构造开销大的 Debug 消息前先用 `Logger.IsEnabled(LogLevel.Debug)` 挡一层。
+
 ## Win32 互操作
 
 声明集中在 `NativeMethods.cs`（主题相关的在 `Theme/DarkModeNative.cs`），每个注明
