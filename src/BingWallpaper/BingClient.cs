@@ -260,7 +260,24 @@ internal sealed class BingClient : IDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Decodes the file to prove the bytes really are an image.</summary>
+    /// <summary>
+    /// Reads the header to prove the bytes really are an image, and checks the end of
+    /// the file to prove the download was not cut short.
+    ///
+    /// <para>
+    /// validateImageData is deliberately false. Passing true makes GDI+ decode every
+    /// pixel, and for a UHD wallpaper that is a 3840x2160x4 bitmap - over 30 MB - held
+    /// for the length of the call, which is by far the largest allocation this program
+    /// makes and it exists only to answer a yes or no question. With false, GDI+ parses
+    /// the header, which is enough for both the format check and the dimensions.
+    /// </para>
+    /// <para>
+    /// The one thing the header cannot catch is a truncated body, which is exactly the
+    /// failure this validation exists for - a connection dropped mid transfer leaves a
+    /// file that still opens. <see cref="HasCompleteTrailer"/> covers that instead, at
+    /// the cost of reading the last two bytes.
+    /// </para>
+    /// </summary>
     public static bool TryValidateImage(string path, out int width, out int height, out string? error)
     {
         width = 0;
@@ -269,21 +286,100 @@ internal sealed class BingClient : IDisposable
         try
         {
             using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-            using (Image image = Image.FromStream(
-                stream,
-                useEmbeddedColorManagement: false,
-                validateImageData: true))
             {
-                width = image.Width;
-                height = image.Height;
-                return width > 0 && height > 0;
+                using (Image image = Image.FromStream(
+                    stream,
+                    useEmbeddedColorManagement: false,
+                    validateImageData: false))
+                {
+                    width = image.Width;
+                    height = image.Height;
+                    if (width <= 0 || height <= 0)
+                    {
+                        error = "the header reports a " + width + "x" + height + " image";
+                        return false;
+                    }
+                }
+
+                if (!HasCompleteTrailer(stream, out error))
+                {
+                    return false;
+                }
             }
+
+            return true;
         }
         catch (Exception ex)
         {
             error = ex.Message;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Whether the file ends the way its format says it should - the cheap stand in for
+    /// decoding the whole picture just to notice a download stopped halfway.
+    ///
+    /// <para>
+    /// Only JPEG and PNG are checked because those are the only two Bing serves. An
+    /// unrecognised format is accepted rather than rejected: this is a truncation guard,
+    /// and the format itself was already vouched for by the decoder above.
+    /// </para>
+    /// </summary>
+    private static bool HasCompleteTrailer(FileStream stream, out string? error)
+    {
+        error = null;
+        if (stream.Length < 4)
+        {
+            error = "the file is only " + stream.Length + " bytes long";
+            return false;
+        }
+
+        byte[] head = new byte[2];
+        stream.Position = 0;
+        if (stream.Read(head, 0, 2) != 2)
+        {
+            error = "the file is too short to identify";
+            return false;
+        }
+
+        // JPEG: SOI FF D8, and a complete stream ends with EOI FF D9.
+        if (head[0] == 0xFF && head[1] == 0xD8)
+        {
+            byte[] tail = new byte[2];
+            stream.Position = stream.Length - 2;
+            if (stream.Read(tail, 0, 2) != 2 || tail[0] != 0xFF || tail[1] != 0xD9)
+            {
+                error = "the JPEG data ends without an EOI marker (truncated download)";
+                return false;
+            }
+
+            return true;
+        }
+
+        // PNG: signature starts 89 50, and the last chunk of a complete file is IEND,
+        // whose type field sits 8 bytes before the end (4 type + 4 CRC).
+        if (head[0] == 0x89 && head[1] == 0x50)
+        {
+            if (stream.Length < 12)
+            {
+                error = "the PNG data is too short to hold an IEND chunk";
+                return false;
+            }
+
+            byte[] tail = new byte[4];
+            stream.Position = stream.Length - 8;
+            if (stream.Read(tail, 0, 4) != 4
+                || tail[0] != 'I' || tail[1] != 'E' || tail[2] != 'N' || tail[3] != 'D')
+            {
+                error = "the PNG data ends without an IEND chunk (truncated download)";
+                return false;
+            }
+
+            return true;
+        }
+
+        return true;
     }
 
     public void Dispose()

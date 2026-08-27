@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -342,7 +344,7 @@ internal sealed class HistoryForm : Form
                     return;
                 }
 
-                _tiles[i].Thumbnail = Decode(bytes);
+                _tiles[i].Thumbnail = Decode(bytes, _tiles[i].Width);
             }
             catch (OperationCanceledException)
             {
@@ -356,16 +358,62 @@ internal sealed class HistoryForm : Form
     }
 
     /// <summary>
-    /// Copies the bytes into a standalone bitmap. Image.FromStream keeps using the
-    /// stream it was given, which is closed as soon as this method returns, and the
-    /// tile scales the picture to its own box while painting.
+    /// Decodes the bytes into a bitmap no larger than the box that will paint it.
+    ///
+    /// Image.FromStream keeps using the stream it was given, which is closed as soon
+    /// as this method returns, so a copy has to be made either way - and the copy may
+    /// as well be the size that is actually needed. Bing serves the thumbnail at
+    /// 400x240, which as a 32bpp bitmap is 384 KB against the 90 KB a tile sized one
+    /// costs, and eight of those are held for as long as the window is open. Scaling
+    /// here rather than in OnPaint also means it happens once per picture instead of
+    /// once per repaint. The aspect ratio is left alone: the tile crops to 16:9 while
+    /// painting, and pre-cropping here would put that decision in two places.
     /// </summary>
-    private static Bitmap Decode(byte[] bytes)
+    private static Bitmap Decode(byte[] bytes, int targetWidth)
     {
         using (MemoryStream stream = new MemoryStream(bytes))
         using (Image source = Image.FromStream(stream))
         {
-            return new Bitmap(source);
+            if (targetWidth <= 0 || source.Width <= targetWidth)
+            {
+                return new Bitmap(source);
+            }
+
+            int height = Math.Max(1, (int)Math.Round((double)source.Height * targetWidth / source.Width));
+            Bitmap scaled = new Bitmap(targetWidth, height);
+            try
+            {
+                using (Graphics g = Graphics.FromImage(scaled))
+                using (ImageAttributes attributes = new ImageAttributes())
+                {
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                    // A bicubic kernel samples past the edge of the source, and what it
+                    // finds there is the transparent background of a fresh 32bppArgb
+                    // bitmap, which comes out as a half transparent border. Mirroring the
+                    // source instead gives the filter real pixels to work with. Currently
+                    // invisible - the tile crops the top and bottom away and its frame
+                    // covers the sides - but that is coincidence, not immunity.
+                    attributes.SetWrapMode(WrapMode.TileFlipXY);
+                    g.DrawImage(
+                        source,
+                        new Rectangle(0, 0, targetWidth, height),
+                        0,
+                        0,
+                        source.Width,
+                        source.Height,
+                        GraphicsUnit.Pixel,
+                        attributes);
+                }
+
+                return scaled;
+            }
+            catch
+            {
+                scaled.Dispose();
+                throw;
+            }
         }
     }
 

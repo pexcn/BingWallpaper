@@ -68,7 +68,7 @@ PinnedWallpaper=          ; 锁定的壁纸文件名，留空表示跟随检查�
 
 本程序只做一件事：把 Bing 每日图片下载下来，并设为壁纸。
 
-## 技术说明
+## 技术细节
 
 <details>
 <summary>实现细节与取舍，一般使用者不必阅读（点击展开）</summary>
@@ -94,11 +94,19 @@ PinnedWallpaper=          ; 锁定的壁纸文件名，留空表示跟随检查�
   它跨市场稳定，于是反复切换市场不会把同一张照片存成好几份
 - 切换分辨率后，同一张图的旧尺寸副本会被清掉——但**只在当前分辨率那份确实存在时**才删，
   所以这一步只会去掉多余副本，永远不会删掉某张图的最后一份
-- 下载先写 `.tmp`、解码校验通过后再原子改名，避免半截文件被当作有效缓存
+- 下载先写 `.tmp`、校验通过后再原子改名，避免半截文件被当作有效缓存。校验只读文件头拿格式和尺寸，
+  再查尾部的结束标记（JPEG 的 `FF D9` / PNG 的 `IEND`）确认没被截断——不做整图解码，
+  否则一张 UHD 壁纸会为了回答「是不是图片」而瞬时占掉 30 MB 以上
 - 全局异常钩子（`Application.ThreadException`、`AppDomain.UnhandledException`、`TaskScheduler.UnobservedTaskException`）
   会把完整异常链写入日志并弹出可复制文本的错误对话框
 - 单选框 / 复选框为自绘控件：系统绘制的字形在深色背景下会变成「黑底黑点」，自绘后选中态在两种主题下
   都是强调色蓝
+- 历史缩略图按绘制它的格子宽度解码，而不是必应给的 400x240：8 张常驻位图从约 3 MB 降到约 750 KB
+  （100% DPI），缩放也从每次重绘一次变成每张图一次
+- 不主动调 `GC.Collect` 或 `EmptyWorkingSet`。任务管理器里看到的涨落是 GC 堆在两次回收之间的
+  锯齿（实测 1.7 → 7.2 MB），而进程提交量（Private Bytes）二十次切换地区只从 26.1 走到 27.0 MB——
+  没有泄漏，也就没什么可回收的。`EmptyWorkingSet` 只把页挪到 standby list，提交量一分不减；
+  强制压缩式 GC 实测反而让 Private Bytes 和工作集都微升，因为 CLR 压缩完会留着堆段复用
 - 全球化功能保持启用：曾经开启的 `InvariantGlobalization`（.NET 10 时期）会让 WinForms 在切换输入法
   （`WM_INPUTLANGCHANGE` → `CultureInfo.GetCultureInfo(lcid)`）时直接崩溃
 
