@@ -38,6 +38,19 @@ internal sealed class SettingsChangedEventArgs : EventArgs
 /// </summary>
 internal sealed class SettingsForm : Form
 {
+    /// <summary>
+    /// How long a drop down has to sit still before its value is written out.
+    ///
+    /// <para>
+    /// A drop down list reports every entry the selection passes over, so one flick of
+    /// the wheel or one held down arrow key used to write the INI file and fire a
+    /// refresh per entry - twelve markets scrolled past meant twelve API requests and
+    /// twelve wallpapers applied to the desktop. Long enough to swallow a scroll,
+    /// short enough that letting go feels like it took effect at once.
+    /// </para>
+    /// </summary>
+    private const int CommitDebounceMilliseconds = 400;
+
     private static readonly string[] Markets =
     {
         "zh-CN", "en-US", "en-GB", "en-AU", "en-CA", "en-IN", "en-NZ",
@@ -61,6 +74,20 @@ internal sealed class SettingsForm : Form
 
     private TableLayoutPanel _root = null!;
     private bool _loading;
+
+    /// <summary>
+    /// Runs the pending drop down commit once the selection has stopped moving. One
+    /// timer for all of them: the settings it defers are independent, but a burst only
+    /// ever comes from the one drop down the wheel is over, and a shared timer cannot
+    /// leave a second commit stranded behind the first.
+    /// </summary>
+    private readonly System.Windows.Forms.Timer _commitTimer = new()
+    {
+        Interval = CommitDebounceMilliseconds,
+    };
+
+    /// <summary>The setting <see cref="_commitTimer"/> will persist, if any.</summary>
+    private SettingKind? _pendingKind;
 
     public SettingsForm(AppConfig config)
     {
@@ -145,6 +172,27 @@ internal sealed class SettingsForm : Form
         {
             ActiveControl = _closeButton;
         }
+    }
+
+    /// <summary>
+    /// Closing disposes the window and with it <see cref="_commitTimer"/>, so a change
+    /// still waiting out its debounce has to be written here - picking a market and
+    /// closing straight away is fast enough to land inside the window.
+    /// </summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        FlushPendingCommit();
+        base.OnFormClosing(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _commitTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     /// <summary>
@@ -438,6 +486,8 @@ internal sealed class SettingsForm : Form
 
     private void WireEvents()
     {
+        _commitTimer.Tick += (_, _) => FlushPendingCommit();
+
         _marketBox.SelectedIndexChanged += (_, _) => CommitMarket();
 
         _resolution4K.CheckedChanged += (_, _) => CommitResolution(_resolution4K, ResolutionKind.Uhd);
@@ -451,7 +501,7 @@ internal sealed class SettingsForm : Form
             }
 
             _config.Fit = (WallpaperFit)_fitBox.SelectedIndex;
-            Persist(SettingKind.Fit);
+            PersistDeferred(SettingKind.Fit);
         };
 
         _themeSystem.CheckedChanged += (_, _) => CommitTheme(_themeSystem, ThemeMode.System);
@@ -467,7 +517,7 @@ internal sealed class SettingsForm : Form
             }
 
             _config.RefreshIntervalHours = hours;
-            Persist(SettingKind.Interval);
+            PersistDeferred(SettingKind.Interval);
         };
 
         _keepDaysBox.SelectedIndexChanged += (_, _) =>
@@ -479,7 +529,7 @@ internal sealed class SettingsForm : Form
             }
 
             _config.KeepDays = days;
-            Persist(SettingKind.KeepDays);
+            PersistDeferred(SettingKind.KeepDays);
         };
 
         _startupBox.CheckedChanged += (_, _) =>
@@ -531,11 +581,68 @@ internal sealed class SettingsForm : Form
         }
 
         _config.Market = market;
-        Persist(SettingKind.Market);
+        PersistDeferred(SettingKind.Market);
+    }
+
+    /// <summary>
+    /// Arms <see cref="_commitTimer"/> for a change a drop down has already written to
+    /// <see cref="_config"/> in memory. Restarting the timer is what collapses a burst:
+    /// only the entry the selection came to rest on gets as far as the INI file.
+    ///
+    /// <para>
+    /// A pending commit of a *different* setting is run rather than dropped - it would
+    /// otherwise be lost, since one timer cannot hold two deadlines.
+    /// </para>
+    /// </summary>
+    private void PersistDeferred(SettingKind kind)
+    {
+        if (_pendingKind is SettingKind pending && pending != kind)
+        {
+            FlushPendingCommit();
+        }
+
+        _pendingKind = kind;
+
+        // Stop then Start, not Enabled = true: an already running timer keeps counting
+        // from where it was, which would let a long enough burst reach the deadline
+        // mid-scroll.
+        _commitTimer.Stop();
+        _commitTimer.Start();
+    }
+
+    /// <summary>
+    /// Persists the deferred change, if there is one. Called from the timer, before an
+    /// immediate commit and while the window closes, so nothing the user did can be
+    /// left sitting in a timer that is about to be disposed.
+    /// </summary>
+    private void FlushPendingCommit()
+    {
+        _commitTimer.Stop();
+        if (_pendingKind is not SettingKind kind)
+        {
+            return;
+        }
+
+        _pendingKind = null;
+        Persist(kind);
     }
 
     private void Persist(SettingKind kind)
     {
+        // Anything committed straight away supersedes a deferred change of another
+        // setting: writing this one first would put the two into the INI file in the
+        // opposite order to the one they were made in.
+        if (_pendingKind is SettingKind pending && pending != kind)
+        {
+            FlushPendingCommit();
+        }
+        else
+        {
+            // Same setting, now being written for real: the timer has nothing left to do.
+            _commitTimer.Stop();
+            _pendingKind = null;
+        }
+
         try
         {
             _config.Save(Paths.ConfigFile);

@@ -50,16 +50,22 @@ internal sealed class TrayContext : ApplicationContext
     private bool _busy;
 
     /// <summary>
-    /// Set when a trigger arrives while a refresh is running, which is what the mouse
-    /// wheel over the market drop down produces: SelectedIndexChanged fires once per
-    /// entry it passes over. These used to be dropped, so the first entry won and the
-    /// one the user stopped on was lost - the INI named one market while the desktop
-    /// showed a picture from another.
+    /// Set when a trigger arrives while a refresh is running. These used to be dropped,
+    /// which left the INI naming one setting while the desktop showed a picture from
+    /// another, with nothing to reconcile the two.
+    ///
+    /// <para>
+    /// SettingsForm debounces its drop downs, so the bursts this was written for no
+    /// longer reach here - but it is not only about bursts. Any two triggers close
+    /// enough together still collide: changing the resolution and then the market goes
+    /// through different commit paths and cannot be debounced into one, and a timer
+    /// tick lands whenever it lands.
+    /// </para>
     ///
     /// <para>
     /// One flag rather than a queue, because a queue would have nothing useful in it:
     /// the next pass reads <see cref="AppConfig.Market"/> again, so a single rerun ends
-    /// on whatever the selection settled on no matter how many triggers it collapsed.
+    /// on whatever the settings settled on no matter how many triggers it collapsed.
     /// </para>
     /// </summary>
     private bool _rerunRequested;
