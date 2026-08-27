@@ -18,6 +18,13 @@ internal sealed class BingImageInfo
 
     private const string FallbackImageId = "image";
 
+    /// <summary>
+    /// What some markets put in "title" instead of a title - en-AU and en-NZ answer
+    /// with it for every entry of the eight day window. Treated as absent rather than
+    /// shown, otherwise the tray menu reads "2026-08-26 · Info".
+    /// </summary>
+    private const string PlaceholderTitle = "Info";
+
     /// <summary>Real tokens are far shorter; this only guards against a pathological urlbase.</summary>
     private const int MaxImageIdLength = 64;
 
@@ -196,7 +203,16 @@ internal sealed class BingImageInfo
         return true;
     }
 
-    public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? Copyright : Title;
+    public string DisplayTitle => HasUsableTitle ? Title : Copyright;
+
+    /// <summary>
+    /// Whether "title" carries something worth showing. Both branches fall back to
+    /// <see cref="Copyright"/>, which every market fills in even where the title is
+    /// a placeholder.
+    /// </summary>
+    private bool HasUsableTitle
+        => !string.IsNullOrWhiteSpace(Title)
+           && !string.Equals(Title.Trim(), PlaceholderTitle, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Date and title on one line, for the places that show both. The middle dot
