@@ -765,9 +765,17 @@ internal sealed class TrayContext : ApplicationContext
         {
             case SettingKind.Market:
             case SettingKind.Resolution:
-                // The pinned file belongs to the old settings, so keeping it would
-                // contradict the change that was just made.
-                SetPinned(null);
+                if (e.Kind == SettingKind.Resolution)
+                {
+                    // The resolution is part of the cache file name, so the pinned name
+                    // now points at a file that is no longer the one to use. A market
+                    // does not invalidate the pin the same way: it is the channel the
+                    // metadata comes through, not a property of the photo on the
+                    // desktop, so releasing the lock there only undid what the user had
+                    // just asked for.
+                    SetPinned(null);
+                }
+
                 _appliedPath = null;
                 _appliedImage = null;
                 _currentIndex = 0;
