@@ -19,6 +19,18 @@ namespace BingWallpaper.UI;
 /// </summary>
 internal sealed class TrayContext : ApplicationContext
 {
+    /// <summary>
+    /// How wide the title row is allowed to make the menu, in characters.
+    ///
+    /// <para>
+    /// It is the widest row and therefore the one that sets the width of the whole
+    /// menu, and a menu wider than the seven short rows underneath it stops reading
+    /// as a tray menu at all. The full title is a hover away in the tooltip and
+    /// spelled out in the picker, so the row can afford to be the short one.
+    /// </para>
+    /// </summary>
+    private const int MenuTitleLength = 36;
+
     private readonly AppConfig _config;
     private readonly BingClient _client = new();
     private readonly ThumbnailCache _thumbnails;
@@ -966,12 +978,10 @@ internal sealed class TrayContext : ApplicationContext
         // characters the shell gives a tray tooltip.
         if (_appliedImage is not null)
         {
-            // The title row is the widest thing in the menu and therefore what sets
-            // its width. 48 characters is about as far as the menu can grow before it
-            // stops looking like a tray menu; the full title is a hover away in the
-            // tooltip and spelled out in the picker.
+            // A Bing title is a sentence written to be read, so half of one still
+            // says something: it is cut at MenuTitleLength rather than dropped.
             string line = BracketDate(_appliedImage.DisplayDate, pinned) + " · " + _appliedImage.DisplayTitle;
-            _titleItem.Text = EscapeMnemonic(Truncate(line, 48));
+            _titleItem.Text = EscapeMnemonic(Truncate(line, MenuTitleLength));
             _tray.Text = Truncate("必应壁纸 · " + _appliedImage.DisplayTitle, 63);
         }
         else if (pinned && _appliedPath is not null)
@@ -986,14 +996,27 @@ internal sealed class TrayContext : ApplicationContext
             // picture, and this is the one of them that already knows which folder it
             // ended up in, which the write time has to be read from.
             //
-            // Described once for both rows: they differ only in the brackets, and a
-            // name with no date in it costs a stat to describe - twice would be twice.
+            // Described once for both rows: they are built from the same two pieces,
+            // and a name with no date in it costs a stat to describe - twice would be
+            // twice.
             Favorites.DescribeFile(_appliedPath, out string date, out string named);
             bool remembered = !string.IsNullOrEmpty(_pinnedTitle);
 
-            _titleItem.Text = EscapeMnemonic(Truncate(
-                DescribeWallpaper(date, remembered ? _pinnedTitle! : named, locked: true),
-                48));
+            // A caption taken from the file name says nothing once it is cut: the
+            // half of "Space_91_OBGA.AdobeStock_4803068…" that survives is not a
+            // title, just noise the eye has to step over on its way to the date. So
+            // it is dropped rather than truncated, leaving the row saying the one
+            // thing it still knows - and the whole name is a hover away in the
+            // tooltip, which is wider. A title favorites.txt remembered is words
+            // someone wrote, and is truncated like any other title; a name that fits
+            // is shown whole either way.
+            string line = DescribeWallpaper(date, remembered ? _pinnedTitle! : named, locked: true);
+            if (!remembered && date.Length != 0 && line.Length > MenuTitleLength)
+            {
+                line = DescribeWallpaper(date, string.Empty, locked: true);
+            }
+
+            _titleItem.Text = EscapeMnemonic(Truncate(line, MenuTitleLength));
             _tray.Text = Truncate(
                 "必应壁纸 · " + (remembered ? _pinnedTitle! : DescribeWallpaper(date, named, locked: false)),
                 63);
