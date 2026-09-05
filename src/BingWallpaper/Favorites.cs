@@ -51,7 +51,10 @@ internal readonly struct FavoriteItem
     /// </summary>
     public bool IsBingImage { get; }
 
-    /// <summary>Publication date for our own files, last write time for everyone else's.</summary>
+    /// <summary>
+    /// The date the picture is from: publication date for our own files, a date read
+    /// out of the name for the rest, and last write time only when the name has none.
+    /// </summary>
     public DateTime SortKey { get; }
 
     public long Length { get; }
@@ -84,6 +87,13 @@ internal static class Favorites
     /// drop in here. Anything else in the folder is ignored rather than reported.
     /// </summary>
     private static readonly string[] PictureExtensions = { ".jpg", ".jpeg", ".png", ".bmp" };
+
+    /// <summary>
+    /// The earliest year a four digit run in a file name is read as one. Below it a
+    /// run is a serial number rather than a photo, and DateTime.DaysInMonth throws
+    /// outright at year zero.
+    /// </summary>
+    private const int MinNameYear = 1900;
 
     private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
@@ -126,7 +136,7 @@ internal static class Favorites
                 }
 
                 bool isBing = BingImageInfo.TryParseFileName(file.Name, out string startDate, out _);
-                DateTime sortKey = file.LastWriteTime;
+                DateTime sortKey;
                 if (isBing && DateTime.TryParseExact(
                         startDate,
                         "yyyyMMdd",
@@ -135,6 +145,10 @@ internal static class Favorites
                         out DateTime published))
                 {
                     sortKey = published;
+                }
+                else if (!TryParseDateInName(file.Name, out sortKey))
+                {
+                    sortKey = file.LastWriteTime;
                 }
 
                 string displayDate = sortKey.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -531,6 +545,159 @@ internal static class Favorites
 
         return names;
     }
+
+    /// <summary>
+    /// Pulls a date out of a file name: 20250101, 2025-01-01 or 2025_01_01 - and,
+    /// with a separator, single digit fields as well (2025-1-1) - anywhere in the
+    /// name and with anything around it. IMG_20250101_120000.jpg is what a camera or
+    /// a screenshot tool usually hands over; 2025-1-1 is what a person types.
+    ///
+    /// <para>
+    /// Worth the scan because the fallback is so much worse: a picture the user
+    /// dropped in here carries whatever last write time the copy gave it, so a folder
+    /// brought over in one go arrives as a single undifferentiated day and sorts by
+    /// nothing at all. The name is then the only place the date the picture is *from*
+    /// still exists.
+    /// </para>
+    /// <para>
+    /// A candidate has to begin where a digit run begins, which is what keeps serial
+    /// numbers out: of "1234567890123456" only the leading eight digits are ever
+    /// tried, and they still have to be a real calendar date. Trailing digits are
+    /// allowed - "20250101120000" is a timestamp, not a fourteen digit number.
+    /// </para>
+    /// </summary>
+    private static bool TryParseDateInName(string fileName, out DateTime date)
+    {
+        string name = Path.GetFileNameWithoutExtension(fileName);
+        for (int i = 0; i + 8 <= name.Length; i++)
+        {
+            if (i > 0 && IsDigit(name[i - 1]))
+            {
+                continue;
+            }
+
+            if (TryReadDate(name, i, out date))
+            {
+                return true;
+            }
+        }
+
+        date = default(DateTime);
+        return false;
+    }
+
+    /// <summary>
+    /// Reads a date starting exactly at <paramref name="start"/>: yyyyMMdd, or
+    /// yyyy-M-d / yyyy_M_d with one or two digit fields, both separators the same
+    /// character.
+    ///
+    /// <para>
+    /// The month and the day are only allowed to vary in width once a separator has
+    /// established where they begin and end - "2025-1-12" is unambiguous, a compact
+    /// run of digits is not. Hand rolled rather than Substring plus TryParseExact:
+    /// this runs at every offset of every file name in the folder, and the string it
+    /// would allocate is thrown away on the very next line.
+    /// </para>
+    /// </summary>
+    private static bool TryReadDate(string name, int start, out DateTime date)
+    {
+        date = default(DateTime);
+
+        if (!TryReadNumber(name, start, 4, out int year))
+        {
+            return false;
+        }
+
+        int month;
+        int day;
+        char separator = start + 4 < name.Length ? name[start + 4] : '\0';
+        if (separator == '-' || separator == '_')
+        {
+            // The second separator has to match the first, so that 2025-01_01 is not
+            // a date and neither is a range like 2025-01 01.
+            if (!TryReadField(name, start + 5, out month, out int afterMonth) ||
+                afterMonth >= name.Length || name[afterMonth] != separator ||
+                !TryReadField(name, afterMonth + 1, out day, out int afterDay))
+            {
+                return false;
+            }
+
+            // A variable width field cannot tell 2025-1-12 from 2025-1-123 by its own
+            // length, so the day has to end where the digits end. The compact form
+            // has no such need: eight digits are eight digits whatever follows them.
+            if (afterDay < name.Length && IsDigit(name[afterDay]))
+            {
+                return false;
+            }
+        }
+        else if (start + 8 > name.Length ||
+            !TryReadNumber(name, start + 4, 2, out month) ||
+            !TryReadNumber(name, start + 6, 2, out day))
+        {
+            return false;
+        }
+
+        if (year < MinNameYear || month < 1 || month > 12 ||
+            day < 1 || day > DateTime.DaysInMonth(year, month))
+        {
+            return false;
+        }
+
+        DateTime parsed = new DateTime(year, month, day);
+
+        // Tomorrow rather than today: the name may have been stamped in a time zone
+        // ahead of this one. Beyond that it is not a date the picture can be from,
+        // and taking it would park the entry at the top of a newest-first list until
+        // the calendar caught up.
+        if (parsed > DateTime.Today.AddDays(1))
+        {
+            return false;
+        }
+
+        date = parsed;
+        return true;
+    }
+
+    /// <summary>
+    /// Reads a one or two digit field and reports where it ended. Greedy, which needs
+    /// no backtracking here: what stops it is either the separator or the end of the
+    /// name, neither of which is a digit.
+    /// </summary>
+    private static bool TryReadField(string name, int start, out int value, out int end)
+    {
+        value = 0;
+        end = start;
+        while (end < name.Length && end - start < 2 && IsDigit(name[end]))
+        {
+            value = (value * 10) + (name[end] - '0');
+            end++;
+        }
+
+        return end > start;
+    }
+
+    /// <summary>Reads exactly <paramref name="count"/> digits as a number.</summary>
+    private static bool TryReadNumber(string name, int start, int count, out int value)
+    {
+        value = 0;
+        for (int i = start; i < start + count; i++)
+        {
+            if (!IsDigit(name[i]))
+            {
+                return false;
+            }
+
+            value = (value * 10) + (name[i] - '0');
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// char.IsDigit would also accept Arabic-Indic and other Unicode digits, which
+    /// are not what the arithmetic above means by a digit.
+    /// </summary>
+    private static bool IsDigit(char c) => c >= '0' && c <= '9';
 
     private static bool IsPicture(string fileName)
     {
