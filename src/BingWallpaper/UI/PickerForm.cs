@@ -51,12 +51,26 @@ internal sealed class PickerForm : Form
 
     private const int FavoritesTab = 1;
 
+    /// <summary>
+    /// How long the outcome of an action stays on the status bar before the bar goes
+    /// back to what the tab says at rest. Long enough to be read after the eye has come
+    /// back from the tile that was clicked, short enough that the bar is not still
+    /// reporting a delete from ten minutes ago.
+    /// </summary>
+    private const int TransientStatusMilliseconds = 5000;
+
     private readonly TrayContext _context;
     private readonly ThemedSegmentedControl _tabs = new ThemedSegmentedControl("最近", "收藏");
     private readonly ThemedSeparator _tabSeparator = new ThemedSeparator();
     private readonly TileGrid _grid = new TileGrid();
     private readonly ThemedSeparator _statusSeparator = new ThemedSeparator();
     private readonly ThemedStatusLabel _status = new ThemedStatusLabel();
+
+    /// <summary>Drops the one-off message put up by <see cref="SetTransientStatus"/>.</summary>
+    private readonly System.Windows.Forms.Timer _statusTimer = new()
+    {
+        Interval = TransientStatusMilliseconds,
+    };
 
     /// <summary>File names in favorites\, for the stars on the recent tab.</summary>
     private HashSet<string> _favoriteNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -112,6 +126,7 @@ internal sealed class PickerForm : Form
         _status.Height = 28;
         _status.Padding = new Padding(8, 0, 8, 0);
         _status.Text = _statusText;
+        _statusTimer.Tick += (_, _) => RestoreRestingStatus();
 
         // Docking is resolved from the last control backwards, so the status bar takes
         // the bottom edge, the tab strip the top one and the grid fills the rest.
@@ -185,6 +200,7 @@ internal sealed class PickerForm : Form
             _favorites?.Dispose();
             _store?.Dispose();
             _menu?.Dispose();
+            _statusTimer.Dispose();
         }
 
         base.Dispose(disposing);
@@ -411,11 +427,47 @@ internal sealed class PickerForm : Form
         base.OnMouseWheel(e);
     }
 
-    /// <summary>Remembers the text so hovering a tile can restore it afterwards.</summary>
+    /// <summary>
+    /// Remembers the text so hovering a tile can restore it afterwards, and cancels a
+    /// pending restore - what is being said now is the newer word on the bar.
+    /// </summary>
     private void SetStatus(string text)
     {
+        _statusTimer.Stop();
         _statusText = text;
+
+        // Written straight to the label rather than through ShowStatus: the cursor is
+        // still on the tile that was just clicked, and what the user did has to win
+        // over the title of whatever they are hovering.
         _status.Text = text;
+    }
+
+    /// <summary>
+    /// The outcome of something the user just did. It says its piece and then gets out
+    /// of the way, so the bar is not left reporting the last action for as long as the
+    /// window stays open. Not for a failure that leaves the window with nothing else to
+    /// show - the initial fetch - which has no resting text to fall back to.
+    /// </summary>
+    private void SetTransientStatus(string text)
+    {
+        SetStatus(text);
+        _statusTimer.Start();
+    }
+
+    /// <summary>
+    /// Puts the bar back to what the tab says at rest, once a one-off message has had
+    /// its time. The text is rebuilt rather than restored from before the message went
+    /// up: a delete changes both the count and the size, and a captured text would put
+    /// the numbers from before the delete back on screen.
+    /// </summary>
+    private void RestoreRestingStatus()
+    {
+        _statusTimer.Stop();
+        UpdateStatusForTab();
+
+        // And then hand the bar back to the cursor, which may have come to rest on a
+        // tile while the message was up.
+        ShowStatus();
     }
 
     private void UpdateStatusForTab()
@@ -484,7 +536,10 @@ internal sealed class PickerForm : Form
     /// not have: they are icons, the grid has no tooltips, so hovering is what spells
     /// "已锁定" / "已应用" out.
     /// </summary>
-    private void OnHoveredIndexChanged(object? sender, EventArgs e)
+    private void OnHoveredIndexChanged(object? sender, EventArgs e) => ShowStatus();
+
+    /// <summary>Shows the hovered tile if there is one, the remembered text if not.</summary>
+    private void ShowStatus()
     {
         int index = _grid.HoveredIndex;
         ITileSource? source = CurrentSource;
@@ -535,12 +590,12 @@ internal sealed class PickerForm : Form
         try
         {
             await _context.ApplyFromPickerAsync(index).ConfigureAwait(true);
-            SetStatus((_context.IsPinned ? "已锁定：" : "已应用：") + image.DisplayLine);
+            SetTransientStatus((_context.IsPinned ? "已锁定：" : "已应用：") + image.DisplayLine);
         }
         catch (Exception ex)
         {
             Logger.Error("picker: applying the selected wallpaper failed", ex);
-            SetStatus("应用失败，详见日志文件。");
+            SetTransientStatus("应用失败，详见日志文件。");
         }
         finally
         {
@@ -560,7 +615,7 @@ internal sealed class PickerForm : Form
         FavoriteItem item = _favoriteItems[index];
         try
         {
-            SetStatus(_context.ApplyFavorite(item.FileName)
+            SetTransientStatus(_context.ApplyFavorite(item.FileName)
                 ? "已锁定：" + item.DisplayDate + " · " + item.Title
                 : "应用失败，详见日志文件。");
         }
@@ -591,13 +646,15 @@ internal sealed class PickerForm : Form
             switch (Favorites.Delete(item.FileName, Handle))
             {
                 case DeleteOutcome.Deleted:
-                    // Reload first: it rewrites the status line with the new count.
+                    // Reload first: the message below has to be the last word on the
+                    // bar. The new count still gets there - the resting text is
+                    // rebuilt when the message expires.
                     ReloadFavorites(keepPosition: true);
-                    SetStatus("已删除到回收站：" + item.FileName);
+                    SetTransientStatus("已删除到回收站：" + item.FileName);
                     break;
 
                 case DeleteOutcome.Failed:
-                    SetStatus("删除失败，详见日志文件。");
+                    SetTransientStatus("删除失败，详见日志文件。");
                     break;
 
                 // Cancelled: the shell asked and was told no, so there is nothing to
@@ -744,11 +801,11 @@ internal sealed class PickerForm : Form
             {
                 _context.NotifyWallpaperMoved(fileName);
                 ReloadFavorites(keepPosition: true);
-                SetStatus("已收藏：" + image.DisplayLine);
+                SetTransientStatus("已收藏：" + image.DisplayLine);
             }
             else
             {
-                SetStatus("收藏失败，详见日志文件。");
+                SetTransientStatus("收藏失败，详见日志文件。");
             }
         }
         catch (OperationCanceledException)
@@ -760,7 +817,7 @@ internal sealed class PickerForm : Form
             Logger.Error("picker: favouriting failed file=" + fileName, ex);
             if (!IsDisposed)
             {
-                SetStatus("收藏失败，详见日志文件。");
+                SetTransientStatus("收藏失败，详见日志文件。");
             }
         }
         finally
@@ -773,13 +830,13 @@ internal sealed class PickerForm : Form
     {
         if (!Favorites.Remove(fileName))
         {
-            SetStatus("取消收藏失败，详见日志文件。");
+            SetTransientStatus("取消收藏失败，详见日志文件。");
             return;
         }
 
         _context.NotifyWallpaperMoved(fileName);
         ReloadFavorites(keepPosition: true);
-        SetStatus("已取消收藏，图片回到最近缓存中。");
+        SetTransientStatus("已取消收藏，图片回到最近缓存中。");
     }
 
     private static void OpenLink(string url)
