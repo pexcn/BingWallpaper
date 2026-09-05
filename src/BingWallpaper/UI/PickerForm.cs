@@ -664,34 +664,36 @@ internal sealed class PickerForm : Form
         FavoriteItem item = _favoriteItems[index];
         string path = Path.Combine(Paths.FavoritesDirectory, item.FileName);
 
-        List<MenuItem> items = new List<MenuItem>(4)
+        List<MenuItem> items = new List<MenuItem>(5)
         {
             new MenuItem("设为壁纸并锁定", (_, _) => ApplyFavorite(index)) { DefaultItem = true },
+            new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)),
         };
 
         if (item.IsBingImage)
         {
-            items.Add(new MenuItem("取消收藏", (_, _) => Unfavorite(item.FileName)));
-        }
-
-        items.Add(new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)));
-
-        if (item.IsBingImage)
-        {
-            // Last on purpose: the only row here that can be greyed out, and the
-            // least used - the rows that always work come first.
             items.Add(new MenuItem("在必应中查看", (_, _) => OpenLink(item.CopyrightLink))
             {
                 Enabled = !string.IsNullOrWhiteSpace(item.CopyrightLink),
             });
         }
+
+        // The row that takes the picture out of favourites is last in both menus and
+        // behind a separator, so everything above it sits at the same height whichever
+        // kind of entry was right-clicked: the two commands mean one thing to the user
+        // and should not move around under the cursor. The separator groups here, it
+        // does not warn - what marks the destructive one is its wording.
+        items.Add(new MenuItem("-"));
+
+        if (item.IsBingImage)
+        {
+            items.Add(new MenuItem("取消收藏", (_, _) => Unfavorite(item.FileName)));
+        }
         else
         {
-            // Behind a separator and at the bottom, where Explorer keeps its own
-            // delete: it is the one row here that destroys something. Greyed out
-            // while the picture is on the desktop, because the pin stores a bare file
-            // name and would go on naming a file that is now in the recycle bin.
-            items.Add(new MenuItem("-"));
+            // Greyed out while the picture is on the desktop, because the pin stores a
+            // bare file name and would go on naming a file that is now in the recycle
+            // bin.
             items.Add(new MenuItem("删除到回收站", (_, _) => DeleteFavorite(index))
             {
                 Enabled = !IsApplied(item.FileName),
