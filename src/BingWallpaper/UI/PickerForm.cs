@@ -464,14 +464,17 @@ internal sealed class PickerForm : Form
     /// <summary>The badge a picture carries, or null when it carries none.</summary>
     private string? GetBadge(string fileName)
     {
-        string? applied = _context.AppliedFileName;
-        if (applied is null || !string.Equals(applied, fileName, StringComparison.OrdinalIgnoreCase))
+        if (!IsApplied(fileName))
         {
             return null;
         }
 
         return _context.IsPinned ? "已锁定" : "当前";
     }
+
+    /// <summary>Whether this picture is, as far as we know, the wallpaper on screen.</summary>
+    private bool IsApplied(string fileName)
+        => string.Equals(_context.AppliedFileName, fileName, StringComparison.OrdinalIgnoreCase);
 
     private bool IsFavorite(string fileName) => _favoriteNames.Contains(fileName);
 
@@ -559,6 +562,45 @@ internal sealed class PickerForm : Form
         }
     }
 
+    /// <summary>
+    /// Deletes a picture the user put in the folder themselves. No confirmation of
+    /// our own: it goes to the recycle bin, which is where Explorer sends a file it
+    /// deletes without asking either. The shell still asks on the one path that
+    /// cannot be undone - see NativeMethods.RecycleFile.
+    /// </summary>
+    private void DeleteFavorite(int index)
+    {
+        if (_busy || index < 0 || index >= _favoriteItems.Count)
+        {
+            return;
+        }
+
+        _busy = true;
+        FavoriteItem item = _favoriteItems[index];
+        try
+        {
+            switch (Favorites.Delete(item.FileName, Handle))
+            {
+                case DeleteOutcome.Deleted:
+                    // Reload first: it rewrites the status line with the new count.
+                    ReloadFavorites(keepPosition: true);
+                    SetStatus("已删除到回收站：" + item.FileName);
+                    break;
+
+                case DeleteOutcome.Failed:
+                    SetStatus("删除失败，详见日志文件。");
+                    break;
+
+                // Cancelled: the shell asked and was told no, so there is nothing to
+                // report that the dialog has not already said.
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
     private void OnItemMenuRequested(object? sender, TileEventArgs e)
     {
         if (e.Index < 0)
@@ -609,7 +651,8 @@ internal sealed class PickerForm : Form
     /// favourite": there is nowhere to move it to. wallpapers\ is the retention pass's
     /// territory, and a file that carries the user's own last write time would be
     /// deleted by the next pass - or, if it is a .png, never matched by it and left
-    /// behind invisibly. Explorer is the honest answer: their file, their move.
+    /// behind invisibly. Their file, so what it gets instead is a delete of its own -
+    /// to the recycle bin, see Favorites.Delete.
     /// </summary>
     private ContextMenu? BuildFavoriteMenu(int index)
     {
@@ -633,13 +676,25 @@ internal sealed class PickerForm : Form
 
         items.Add(new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)));
 
-        // Last on purpose: the only row here that can be greyed out, and the least
-        // used - the rows that always work come first.
         if (item.IsBingImage)
         {
+            // Last on purpose: the only row here that can be greyed out, and the
+            // least used - the rows that always work come first.
             items.Add(new MenuItem("在必应中查看", (_, _) => OpenLink(item.CopyrightLink))
             {
                 Enabled = !string.IsNullOrWhiteSpace(item.CopyrightLink),
+            });
+        }
+        else
+        {
+            // Behind a separator and at the bottom, where Explorer keeps its own
+            // delete: it is the one row here that destroys something. Greyed out
+            // while the picture is on the desktop, because the pin stores a bare file
+            // name and would go on naming a file that is now in the recycle bin.
+            items.Add(new MenuItem("-"));
+            items.Add(new MenuItem("删除到回收站", (_, _) => DeleteFavorite(index))
+            {
+                Enabled = !IsApplied(item.FileName),
             });
         }
 

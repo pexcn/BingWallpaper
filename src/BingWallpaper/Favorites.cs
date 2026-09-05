@@ -71,8 +71,10 @@ internal readonly struct FavoriteItem
 /// edge case: there is no second copy of the state to reconcile with.
 /// </para>
 /// <para>
-/// Nothing here deletes a picture from favorites\. The three writes this class makes
-/// are: move a file in, move one of *ours* back out, and replace favorites.txt.
+/// The four writes this class makes are: move a file in, move one of *ours* back
+/// out, send one of *theirs* to the recycle bin, and replace favorites.txt. A
+/// picture of ours is never deleted from here - un-favouriting is what it has
+/// instead, and that only moves it.
 /// </para>
 /// </summary>
 internal static class Favorites
@@ -316,6 +318,41 @@ internal static class Favorites
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Sends a picture the user put here themselves to the recycle bin.
+    ///
+    /// <para>
+    /// The mirror image of <see cref="Remove"/>, and restricted the same way round:
+    /// only a file that is *not* ours may be deleted, because ours has somewhere to
+    /// go - un-favouriting moves it back to wallpapers\ and the retention pass takes
+    /// it from there. A picture the user dropped in here has no such second home, so
+    /// until now the only way to be rid of one was to go and find it in Explorer.
+    /// </para>
+    /// <para>
+    /// favorites.txt needs no repair afterwards: a user supplied picture never had a
+    /// line in it, and <see cref="SaveIndex"/> drops orphans on its next write anyway.
+    /// </para>
+    /// </summary>
+    public static DeleteOutcome Delete(string fileName, IntPtr ownerWindow)
+    {
+        if (BingImageInfo.TryParseFileName(fileName, out _, out _))
+        {
+            Logger.Warn("favorites: refusing to delete one of our own pictures file=" + fileName);
+            return DeleteOutcome.Failed;
+        }
+
+        DeleteOutcome outcome = NativeMethods.RecycleFile(
+            ownerWindow,
+            Path.Combine(Paths.FavoritesDirectory, fileName));
+
+        if (outcome == DeleteOutcome.Deleted)
+        {
+            Logger.Info("favorites: deleted file=" + fileName);
+        }
+
+        return outcome;
     }
 
     /// <summary>

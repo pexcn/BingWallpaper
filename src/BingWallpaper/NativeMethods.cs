@@ -1,7 +1,17 @@
 using System;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace BingWallpaper;
+
+/// <summary>How a delete ended. Cancelled is not a failure: the user was asked
+/// whether to delete a file the recycle bin could not take, and said no.</summary>
+internal enum DeleteOutcome
+{
+    Deleted,
+    Cancelled,
+    Failed,
+}
 
 /// <summary>
 /// P/Invoke declarations that are not theme related (theme interop lives in
@@ -29,6 +39,26 @@ internal static class NativeMethods
     /// </summary>
     public const int WS_EX_COMPOSITED = 0x02000000;
 
+    /// <summary>FO_DELETE - SHFILEOPSTRUCTW.wFunc, shellapi.h.</summary>
+    public const uint FO_DELETE = 0x0003;
+
+    /// <summary>FOF_SILENT - no progress dialog for an operation this short.</summary>
+    public const ushort FOF_SILENT = 0x0004;
+
+    /// <summary>FOF_NOCONFIRMATION - do not ask before the delete itself.</summary>
+    public const ushort FOF_NOCONFIRMATION = 0x0010;
+
+    /// <summary>FOF_ALLOWUNDO - to the recycle bin rather than gone.</summary>
+    public const ushort FOF_ALLOWUNDO = 0x0040;
+
+    /// <summary>
+    /// FOF_WANTNUKEWARNING - ask anyway when the recycle bin cannot take the file:
+    /// it is turned off, too small, or the volume has none. Paired with
+    /// FOF_NOCONFIRMATION on purpose - silent while the delete can be undone, a
+    /// question when it cannot.
+    /// </summary>
+    public const ushort FOF_WANTNUKEWARNING = 0x4000;
+
     /// <summary>RECT, windef.h.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
@@ -54,6 +84,30 @@ internal static class NativeMethods
         public RECT PaintRectangle;
         public int Restore;
         public int IncUpdate;
+    }
+
+    /// <summary>
+    /// SHFILEOPSTRUCTW, shellapi.h. The header packs this one to a single byte on 32
+    /// bit builds only, so the natural layout is the right one here - this executable
+    /// is x64, see PlatformTarget in the csproj.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct SHFILEOPSTRUCTW
+    {
+        public IntPtr Owner;
+        public uint Function;
+
+        /// <summary>A *list* of paths, terminated by an empty string - see RecycleFile.</summary>
+        public string? From;
+
+        public string? To;
+        public ushort Flags;
+
+        /// <summary>BOOL, written back by the shell. Set when the user answered a prompt with no.</summary>
+        public int AnyOperationsAborted;
+
+        public IntPtr NameMappings;
+        public string? ProgressTitle;
     }
 
     /// <summary>
@@ -111,6 +165,68 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    /// <summary>
+    /// shell32!SHFileOperationW. Available since Windows 2000. Returns zero on
+    /// success; everything else is one of shellapi.h's own DE_ codes rather than a
+    /// Win32 error, which is why SetLastError is not set here.
+    /// </summary>
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SHFileOperationW(ref SHFILEOPSTRUCTW operation);
+
+    /// <summary>
+    /// Sends one file to the recycle bin, the way Explorer's own delete does.
+    ///
+    /// <para>
+    /// SHFileOperationW rather than IFileOperation, the COM interface that superseded
+    /// it on Vista: this is one call on one file, and the newer way would cost an
+    /// interface declaration, a CoCreateInstance and an apartment to run it in for
+    /// exactly the same result. The old function still ships and still honours the
+    /// recycle bin.
+    /// </para>
+    /// <para>
+    /// The extra NUL is not a typo. pFrom is a list of paths ended by an empty
+    /// string, so a single file has to be "path\0" - the marshaller appends the one
+    /// that terminates the string itself.
+    /// </para>
+    /// </summary>
+    public static DeleteOutcome RecycleFile(IntPtr owner, string path)
+    {
+        SHFILEOPSTRUCTW operation = new SHFILEOPSTRUCTW
+        {
+            Owner = owner,
+            Function = FO_DELETE,
+            From = path + "\0",
+            Flags = (ushort)(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_WANTNUKEWARNING | FOF_SILENT),
+        };
+
+        try
+        {
+            int result = SHFileOperationW(ref operation);
+            if (result != 0)
+            {
+                Logger.Warn(
+                    "shell: shfileoperation failed path=" + path
+                    + " code=0x" + result.ToString("X", CultureInfo.InvariantCulture));
+                return DeleteOutcome.Failed;
+            }
+
+            if (operation.AnyOperationsAborted != 0)
+            {
+                // The nuke warning was answered with no. Nothing was deleted, and the
+                // shell has already said so on screen.
+                Logger.Info("shell: delete cancelled path=" + path);
+                return DeleteOutcome.Cancelled;
+            }
+
+            return DeleteOutcome.Deleted;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("shell: deleting a file failed path=" + path, ex);
+            return DeleteOutcome.Failed;
+        }
+    }
 
     /// <summary>Reads the system DPI, falling back to 96 when the call fails.</summary>
     public static uint GetSystemDpiSafe()
