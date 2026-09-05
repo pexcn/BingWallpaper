@@ -589,14 +589,16 @@ internal sealed class PickerForm : Form
             ? new MenuItem("取消收藏", (_, _) => Unfavorite(fileName))
             : new MenuItem("收藏", (_, _) => StartFavorite(index));
 
-        MenuItem link = new MenuItem("打开版权链接", (_, _) => OpenLink(image.CopyrightLink))
+        MenuItem link = new MenuItem("在必应中查看", (_, _) => OpenLink(image.CopyrightLink))
         {
             Enabled = !string.IsNullOrWhiteSpace(image.CopyrightLink),
         };
 
         return new ContextMenu(new[]
         {
-            new MenuItem("设为壁纸", (_, _) => StartApplyRecent(index)),
+            // Bold, the way the shell marks a menu's default action: this row and a
+            // click on the tile are the same command, and the emphasis is what says so.
+            new MenuItem("设为壁纸", (_, _) => StartApplyRecent(index)) { DefaultItem = true },
             favorite,
             link,
         });
@@ -621,19 +623,19 @@ internal sealed class PickerForm : Form
 
         List<MenuItem> items = new List<MenuItem>(4)
         {
-            new MenuItem("设为壁纸", (_, _) => ApplyFavorite(index)),
+            new MenuItem("设为壁纸", (_, _) => ApplyFavorite(index)) { DefaultItem = true },
         };
 
         if (item.IsBingImage)
         {
             items.Add(new MenuItem("取消收藏", (_, _) => Unfavorite(item.FileName)));
-            items.Add(new MenuItem("打开版权链接", (_, _) => OpenLink(item.CopyrightLink))
+            items.Add(new MenuItem("在必应中查看", (_, _) => OpenLink(item.CopyrightLink))
             {
                 Enabled = !string.IsNullOrWhiteSpace(item.CopyrightLink),
             });
         }
 
-        items.Add(new MenuItem("在资源管理器中显示", (_, _) => ShowInExplorer(path)));
+        items.Add(new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)));
         return new ContextMenu(items.ToArray());
     }
 
