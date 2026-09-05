@@ -189,7 +189,7 @@ internal sealed class PickerForm : Form
             + SystemInformation.VerticalScrollBarWidth;
         int chrome = _tabs.Height + _tabSeparator.Height + _statusSeparator.Height + _status.Height;
 
-        ClientSize = new Size(width, (TileGrid.CellHeight * Rows) + (TileGrid.EdgePadding * 2) + chrome);
+        ClientSize = new Size(width, (_grid.CellHeight * Rows) + (TileGrid.EdgePadding * 2) + chrome);
     }
 
     protected override void Dispose(bool disposing)

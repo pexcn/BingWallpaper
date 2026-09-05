@@ -109,10 +109,11 @@ internal sealed class TileEventArgs : EventArgs
 /// </summary>
 internal sealed class TileGrid : ScrollableControl
 {
-    /// <summary>Logical pixels. The picture is 16:9, the rest holds the two lines.</summary>
+    /// <summary>Logical pixels. The picture is 16:9, the two lines sit below it.</summary>
     public const int TileWidth = 200;
 
-    public const int TileHeight = 160;
+    /// <summary>Logical pixels between the picture and the first caption line.</summary>
+    public const int CaptionGap = 8;
 
     public const int TileMargin = 8;
 
@@ -157,7 +158,19 @@ internal sealed class TileGrid : ScrollableControl
     /// <summary>Device pixel size of one cell, tile plus its margins.</summary>
     public static int CellWidth => DpiScale.Round(TileWidth) + (DpiScale.Round(TileMargin) * 2);
 
-    public static int CellHeight => DpiScale.Round(TileHeight) + (DpiScale.Round(TileMargin) * 2);
+    public int CellHeight => TileHeight + (DpiScale.Round(TileMargin) * 2);
+
+    /// <summary>
+    /// Device pixel height of one tile: the picture, the gap and the two caption
+    /// lines, measured from the font in use instead of fixed. A constant has to be
+    /// tall enough for the tallest font it might meet, and that slack sits under the
+    /// last line of every tile - harmless between rows, but the bottom row hands it
+    /// to the window as a margin visibly wider than the one above the first row.
+    /// </summary>
+    public int TileHeight => PictureHeight + DpiScale.Round(CaptionGap) + (Font.Height * 2);
+
+    /// <summary>Device pixel height of the 16:9 picture at the top of a tile.</summary>
+    private static int PictureHeight => DpiScale.Round(TileWidth) * 9 / 16;
 
     public static int EdgePadding => DpiScale.Round(GridPadding);
 
@@ -379,7 +392,7 @@ internal sealed class TileGrid : ScrollableControl
             _originX + (column * CellWidth) + margin,
             EdgePadding + (row * CellHeight) + margin,
             DpiScale.Round(TileWidth),
-            DpiScale.Round(TileHeight));
+            TileHeight);
     }
 
     /// <summary>The first and last index that can be on screen at the current offset.</summary>
@@ -471,8 +484,8 @@ internal sealed class TileGrid : ScrollableControl
     private void PaintTile(Graphics g, ThemePalette palette, int index, Rectangle bounds, TileInfo info)
     {
         int lineHeight = Font.Height;
-        Rectangle picture = new Rectangle(bounds.X, bounds.Y, bounds.Width, bounds.Width * 9 / 16);
-        int textTop = picture.Bottom + DpiScale.Round(8);
+        Rectangle picture = new Rectangle(bounds.X, bounds.Y, bounds.Width, PictureHeight);
+        int textTop = picture.Bottom + DpiScale.Round(CaptionGap);
 
         PaintPicture(g, palette, picture, info);
         PaintFrame(g, palette, picture, index, info);
