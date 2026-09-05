@@ -431,7 +431,7 @@ internal sealed class PickerForm : Form
             SetStatus(_favoriteItems.Count == 0
                 ? "收藏夹是空的。在「最近」里右键任意一张即可收藏。"
                 : "共 " + _favoriteItems.Count.ToString(CultureInfo.InvariantCulture) +
-                  " 张，占用 " + FormatSize(bytes) + "，右键查看更多操作。");
+                  " 张，占用 " + FormatSize(bytes) + "。");
             return;
         }
 
@@ -598,7 +598,7 @@ internal sealed class PickerForm : Form
         {
             // Bold, the way the shell marks a menu's default action: this row and a
             // click on the tile are the same command, and the emphasis is what says so.
-            new MenuItem("设为壁纸", (_, _) => StartApplyRecent(index)) { DefaultItem = true },
+            new MenuItem("设为壁纸并锁定", (_, _) => StartApplyRecent(index)) { DefaultItem = true },
             favorite,
             link,
         });
@@ -623,19 +623,26 @@ internal sealed class PickerForm : Form
 
         List<MenuItem> items = new List<MenuItem>(4)
         {
-            new MenuItem("设为壁纸", (_, _) => ApplyFavorite(index)) { DefaultItem = true },
+            new MenuItem("设为壁纸并锁定", (_, _) => ApplyFavorite(index)) { DefaultItem = true },
         };
 
         if (item.IsBingImage)
         {
             items.Add(new MenuItem("取消收藏", (_, _) => Unfavorite(item.FileName)));
+        }
+
+        items.Add(new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)));
+
+        // Last on purpose: the only row here that can be greyed out, and the least
+        // used - the rows that always work come first.
+        if (item.IsBingImage)
+        {
             items.Add(new MenuItem("在必应中查看", (_, _) => OpenLink(item.CopyrightLink))
             {
                 Enabled = !string.IsNullOrWhiteSpace(item.CopyrightLink),
             });
         }
 
-        items.Add(new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)));
         return new ContextMenu(items.ToArray());
     }
 
