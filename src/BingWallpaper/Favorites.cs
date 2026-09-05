@@ -281,6 +281,16 @@ internal static class Favorites
     /// a file that is invisible in the UI and never removed. One deletes too eagerly,
     /// the other never; neither is a place to put a picture we promised to keep.
     /// </para>
+    /// <para>
+    /// The retention clock is restarted on the way out. A move keeps the last write
+    /// time, so a picture that sat in favourites\ for longer than KeepDays would land
+    /// back in wallpapers\ already expired and be deleted by the very next cleanup
+    /// pass - one click, and the picture is gone with nothing said. Whatever else
+    /// un-favouriting means, it does not mean delete, so a file leaves here with a
+    /// full retention period ahead of it. The date the picture is *from* lives in its
+    /// name and is what the UI sorts and shows; the timestamp is only what the
+    /// cleanup pass counts, which is what makes it the right thing to touch here.
+    /// </para>
     /// </summary>
     public static bool Remove(string fileName)
     {
@@ -301,6 +311,7 @@ internal static class Favorites
             // downloaded again into the cache. Whatever it replaces is in wallpapers\,
             // never in favorites\.
             Paths.MoveOverwrite(source, destination);
+            Touch(destination);
             Logger.Info("favorites: removed file=" + fileName);
         }
         catch (Exception ex)
@@ -318,6 +329,30 @@ internal static class Favorites
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Dates a file to now, so that the retention pass counts from the moment it
+    /// arrived in wallpapers\ rather than from whenever it was downloaded.
+    ///
+    /// <para>
+    /// Best effort: a stamp that fails costs the picture its retention period, not
+    /// the picture, and failing the whole un-favourite over it would be the worse
+    /// trade. Warn rather than Debug - what it predicts is a wallpaper disappearing
+    /// on some later cleanup, which is exactly what the log gets read to explain.
+    /// </para>
+    /// </summary>
+    private static void Touch(string path)
+    {
+        try
+        {
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("favorites: restarting the retention clock failed file=" +
+                Path.GetFileName(path) + " error=" + ex.Message);
+        }
     }
 
     /// <summary>
