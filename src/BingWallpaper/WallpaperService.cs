@@ -69,6 +69,57 @@ internal static class WallpaperService
         return ok;
     }
 
+    /// <summary>
+    /// Same as <see cref="Apply(string, WallpaperFit)"/>, except that the change
+    /// crossfades out of <paramref name="previousPath"/> - the picture on the desktop
+    /// right now - instead of cutting to the new one.
+    ///
+    /// <para>
+    /// Only Fill fades. The cover has to reproduce the layout Windows is about to
+    /// draw closely enough that removing it is invisible, and Fill is both the default
+    /// and the mode whose rule is a single line worth reproducing. Every other fit, an
+    /// unknown previous picture, a re-apply of the same file, and any failure along
+    /// the way come out here as the plain cut.
+    /// </para>
+    /// </summary>
+    public static bool Apply(string imagePath, WallpaperFit fit, string? previousPath)
+    {
+        if (previousPath is null || !CanFadeFrom(imagePath, fit, previousPath))
+        {
+            return Apply(imagePath, fit);
+        }
+
+        return WallpaperTransition.Run(previousPath, () => Apply(imagePath, fit));
+    }
+
+    /// <summary>Whether a change to <paramref name="imagePath"/> is worth a fade.</summary>
+    private static bool CanFadeFrom(string imagePath, WallpaperFit fit, string previousPath)
+    {
+        if (fit != WallpaperFit.Fill || previousPath.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (string.Equals(
+                    Path.GetFullPath(previousPath),
+                    Path.GetFullPath(imagePath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // The same picture applied again - a fade would be a fade to itself.
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("fade: comparing the two paths failed error=" + ex.Message);
+            return false;
+        }
+
+        return File.Exists(previousPath);
+    }
+
     /// <summary>Reads the wallpaper path Windows currently reports (best effort).</summary>
     public static string? GetCurrentWallpaperFromRegistry()
     {

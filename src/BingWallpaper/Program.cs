@@ -96,6 +96,7 @@ internal static class Program
                 "config: market=" + config.Market +
                 " resolution=" + AppConfig.ResolutionToString(config.Resolution) +
                 " fit=" + config.Fit +
+                " fade=" + config.FadeTransition +
                 " theme=" + config.Theme +
                 " interval=" + config.RefreshIntervalHours + "h" +
                 " keepdays=" + config.KeepDays +

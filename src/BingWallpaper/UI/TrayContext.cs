@@ -233,6 +233,21 @@ internal sealed class TrayContext : ApplicationContext
         _thumbnails.Retain(images);
     }
 
+    /// <summary>
+    /// The picture to crossfade away from, or null when this change should cut.
+    ///
+    /// <para>
+    /// Reading <see cref="_appliedPath"/> before it is overwritten is what makes the
+    /// fade possible at all: the only other record of what is on the desktop is the
+    /// registry value, and that one is not reliable enough to paint from (see
+    /// <see cref="IsCurrentWallpaper"/>) - a wrong picture would show as a jump. Null
+    /// on the paths where there is no such record, which is every apply before this
+    /// program has put a wallpaper up itself: the first refresh after a start, and
+    /// restoring the pin.
+    /// </para>
+    /// </summary>
+    private string? FadeFrom => _config.FadeTransition ? _appliedPath : null;
+
     /// <summary>Downloads (if needed) and applies the image at <paramref name="index"/>.</summary>
     public async Task ApplyIndexAsync(int index, bool force)
     {
@@ -275,7 +290,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         else
         {
-            WallpaperService.Apply(path, _config.Fit);
+            WallpaperService.Apply(path, _config.Fit, FadeFrom);
         }
 
         _currentIndex = index;
@@ -295,6 +310,10 @@ internal sealed class TrayContext : ApplicationContext
         {
             _disposed = true;
             ThemeManager.ThemeChanged -= OnThemeChanged;
+
+            // A fade still running owns a window parented into Explorer's desktop and
+            // a timer on this thread; both go before the message loop that drives them.
+            WallpaperTransition.Cancel();
 
             try
             {
@@ -837,7 +856,7 @@ internal sealed class TrayContext : ApplicationContext
             return false;
         }
 
-        if (!WallpaperService.Apply(path, _config.Fit))
+        if (!WallpaperService.Apply(path, _config.Fit, FadeFrom))
         {
             return false;
         }

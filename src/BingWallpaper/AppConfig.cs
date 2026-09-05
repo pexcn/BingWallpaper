@@ -50,6 +50,19 @@ internal sealed class AppConfig
 
     public WallpaperFit Fit { get; set; } = WallpaperFit.Fill;
 
+    /// <summary>
+    /// Whether a wallpaper change crossfades instead of cutting.
+    ///
+    /// <para>
+    /// Not exposed in the settings UI, like <see cref="LogLevel"/>: the fade is drawn
+    /// into Explorer's own desktop window layout, which is undocumented, and this key
+    /// exists so a machine where a shell replacement or a desktop tool made that
+    /// layout something else can be told to stop trying. It degrades on its own -
+    /// every failure falls back to the cut - so there is nothing here to choose.
+    /// </para>
+    /// </summary>
+    public bool FadeTransition { get; set; } = true;
+
     public ThemeMode Theme { get; set; } = ThemeMode.System;
 
     public int RefreshIntervalHours { get; set; } = 1;
@@ -93,6 +106,7 @@ internal sealed class AppConfig
         config.Market = NormalizeMarket(GetString(values, "Market", config.Market));
         config.Resolution = ParseResolution(GetString(values, "Resolution", "UHD"));
         config.Fit = ParseEnum(GetString(values, "Fit", "Fill"), WallpaperFit.Fill);
+        config.FadeTransition = GetBool(values, "FadeTransition", true);
         config.Theme = ParseEnum(GetString(values, "Theme", "System"), ThemeMode.System);
         config.RefreshIntervalHours = Clamp(
             GetInt(values, "RefreshIntervalHours", 1),
@@ -112,6 +126,7 @@ internal sealed class AppConfig
         sb.AppendLine("Market=" + Market);
         sb.AppendLine("Resolution=" + ResolutionToString(Resolution));
         sb.AppendLine("Fit=" + Fit);
+        sb.AppendLine("FadeTransition=" + (FadeTransition ? "true" : "false"));
         sb.AppendLine("Theme=" + Theme);
         sb.AppendLine("RefreshIntervalHours=" + RefreshIntervalHours.ToString(CultureInfo.InvariantCulture));
         sb.AppendLine("KeepDays=" + KeepDays.ToString(CultureInfo.InvariantCulture));
