@@ -583,9 +583,31 @@ internal sealed class TrayContext : ApplicationContext
                DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture),
                StringComparison.Ordinal);
 
-    /// <summary>Moves inside the 8 day window: -1 goes newer, +1 goes older.</summary>
+    /// <summary>
+    /// Whether the two menu rows step through favorites\ instead of the 8 day window.
+    ///
+    /// <para>
+    /// The pin alone is not the test. Picking a day out of the window pins it too (see
+    /// <see cref="ApplyFromPickerAsync"/>), and that picture belongs to the list the
+    /// window is made of rather than to the folder. What redirects the rows is the
+    /// wallpaper being *in* favorites\ - which is also the only place the order they
+    /// would step through exists at all.
+    /// </para>
+    /// </summary>
+    private bool InFavoriteMode => _config.IsPinned && Favorites.Contains(_config.PinnedWallpaper);
+
+    /// <summary>
+    /// Moves one picture: -1 goes newer, +1 goes older. Which list is stepped is
+    /// <see cref="InFavoriteMode"/>'s answer; both are ordered newest first, so one
+    /// delta means one direction in either.
+    /// </summary>
     private void MoveBy(int delta)
     {
+        if (InFavoriteMode && MoveWithinFavorites(delta))
+        {
+            return;
+        }
+
         int target;
         if (_currentIndex >= 0)
         {
@@ -610,6 +632,71 @@ internal sealed class TrayContext : ApplicationContext
         // Stepping through the list decides nothing: it carries a pin that is already
         // set, and never creates one.
         _ = MoveToAsync(target, pinAfterwards: _config.IsPinned);
+    }
+
+    /// <summary>
+    /// Steps through favorites\, and reports whether it was able to.
+    ///
+    /// <para>
+    /// The folder is enumerated on every click rather than kept in a field. It is the
+    /// only state there is - Explorer, the picker and this menu all write to it - so a
+    /// field here would need invalidating from three directions to save a directory
+    /// read that the apply behind it dwarfs.
+    /// </para>
+    /// <para>
+    /// Nothing here downloads: a favourite is on disk by definition, so this goes
+    /// through the same synchronous path the picker uses and never raises _busy.
+    /// </para>
+    /// </summary>
+    private bool MoveWithinFavorites(int delta)
+    {
+        if (_busy)
+        {
+            // The rows are greyed while busy, but the menu was measured before the
+            // refresh started and the click can still land. Dropped the way
+            // MoveToAsync drops it, and reported as handled either way: the 8 day
+            // path would only reach the same guard.
+            return true;
+        }
+
+        string current = _config.PinnedWallpaper;
+        List<FavoriteItem> items = Favorites.Scan();
+        int index = -1;
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (string.Equals(items[i].FileName, current, StringComparison.OrdinalIgnoreCase))
+            {
+                index = i;
+                break;
+            }
+        }
+
+        if (index < 0)
+        {
+            // InFavoriteMode saw the file a moment ago, so it left between the two
+            // calls. Handing the click back to the 8 day window beats doing nothing.
+            Logger.Warn("switch: the pinned favourite is gone file=" + current);
+            return false;
+        }
+
+        int target = index + delta;
+        if (target < 0 || target >= items.Count)
+        {
+            // An end of the folder is found by clicking, not by a greyed out row - see
+            // UpdateMenuState. Still reported as handled: falling through to the 8 day
+            // window here would jump out of the folder the user is walking.
+            Logger.Debug("switch: no neighbour in the favourites index=" + index + " delta=" + delta);
+            return true;
+        }
+
+        // The call the picker makes, pin included: stepping carries the lock along
+        // instead of dropping the wallpaper back under the refresh timer.
+        if (!ApplyFavorite(items[target].FileName))
+        {
+            ErrorDialog.Show("切换壁纸失败", "详见日志文件。");
+        }
+
+        return true;
     }
 
     private async Task MoveToAsync(int index, bool pinAfterwards)
@@ -774,11 +861,14 @@ internal sealed class TrayContext : ApplicationContext
     /// moves it.
     /// </para>
     /// </summary>
-    private void EnsurePinnedMetadata()
+    /// <param name="inFavorites">
+    /// <see cref="InFavoriteMode"/>, already answered by the caller. Passed in rather
+    /// than asked again so that one menu update probes the folder once.
+    /// </param>
+    private void EnsurePinnedMetadata(bool inFavorites)
     {
         string fileName = _config.PinnedWallpaper;
-        bool eligible = _config.IsPinned && _currentIndex < 0 && Favorites.Contains(fileName);
-        if (!eligible)
+        if (!inFavorites || _currentIndex >= 0)
         {
             _pinnedMetadataFor = string.Empty;
             _pinnedTitle = null;
@@ -812,7 +902,8 @@ internal sealed class TrayContext : ApplicationContext
     private void UpdateMenuState()
     {
         bool pinned = _config.IsPinned;
-        EnsurePinnedMetadata();
+        bool inFavorites = InFavoriteMode;
+        EnsurePinnedMetadata(inFavorites);
 
         // The tooltip names the picture and nothing else: whether it is locked is
         // what the menu is for, and repeating it here only eats into the 63
@@ -857,10 +948,23 @@ internal sealed class TrayContext : ApplicationContext
         // currently says something else, means the row is just a caption.
         _titleItem.Enabled = !_busy && !string.IsNullOrWhiteSpace(CurrentCopyrightLink);
 
-        // _currentIndex == -1 means the wallpaper is not in the list at all: there is
-        // a newer picture to go to, but nothing older.
-        _newerItem.Enabled = !_busy && _images.Count > 0 && _currentIndex != 0;
-        _olderItem.Enabled = !_busy && _currentIndex >= 0 && _currentIndex < _images.Count - 1;
+        if (inFavorites)
+        {
+            // Both rows stay live. Whether there is a neighbour is only knowable by
+            // enumerating favorites\, and this method runs on every refresh and every
+            // busy flip - a directory read per grey pixel is the wrong trade. Clicking
+            // past either end is a no-op instead (see MoveWithinFavorites).
+            _newerItem.Enabled = !_busy;
+            _olderItem.Enabled = !_busy;
+        }
+        else
+        {
+            // _currentIndex == -1 means the wallpaper is not in the list at all: there
+            // is a newer picture to go to, but nothing older.
+            _newerItem.Enabled = !_busy && _images.Count > 0 && _currentIndex != 0;
+            _olderItem.Enabled = !_busy && _currentIndex >= 0 && _currentIndex < _images.Count - 1;
+        }
+
         _refreshItem.Enabled = !_busy;
         _pickerItem.Enabled = !_busy;
 
