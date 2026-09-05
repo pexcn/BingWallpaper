@@ -99,6 +99,12 @@ internal static class Favorites
     /// </summary>
     private const int MinNameYear = 1900;
 
+    /// <summary>
+    /// The longest an ASCII part of a file name can be and still be read as a market
+    /// code rather than as a name. See <see cref="IsWorthShowing"/>.
+    /// </summary>
+    private const int ShortestAsciiCode = 2;
+
     private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>Title and source link of one Bing picture, as stored in favorites.txt.</summary>
@@ -139,42 +145,29 @@ internal static class Favorites
                     continue;
                 }
 
-                bool isBing = BingImageInfo.TryParseFileName(file.Name, out string startDate, out string imageId);
-                DateTime sortKey;
-                string title;
+                string name = Path.GetFileNameWithoutExtension(file.Name);
+                bool isBing = BingImageInfo.TryParseFileName(file.Name, out _, out string imageId);
 
-                if (isBing)
+                // The date a file of ours carries in front of its name is the same
+                // eight digits the scanner reads off any other name, so there is one
+                // parse here rather than two.
+                DateTime sortKey;
+                bool dated = TryParseDateInName(name, out sortKey, out int dateStart, out int dateLength);
+                if (!dated)
                 {
-                    // The id alone, not the whole name: the date is drawn on its own
-                    // line above the caption and the resolution suffix is ours, not
-                    // anything the picture is about. LoadTitles replaces this with the
-                    // real title whenever favorites.txt still has one - it is the
-                    // pictures carried over from another machine that end up wearing
-                    // this.
-                    title = imageId;
-                    if (!DateTime.TryParseExact(
-                            startDate,
-                            "yyyyMMdd",
-                            CultureInfo.InvariantCulture,
-                            DateTimeStyles.None,
-                            out sortKey))
-                    {
-                        sortKey = file.LastWriteTime;
-                    }
+                    sortKey = file.LastWriteTime;
                 }
-                else
-                {
-                    string name = Path.GetFileNameWithoutExtension(file.Name);
-                    if (TryParseDateInName(name, out sortKey, out int dateStart, out int dateLength))
-                    {
-                        title = StripDate(name, dateStart, dateLength);
-                    }
-                    else
-                    {
-                        sortKey = file.LastWriteTime;
-                        title = name;
-                    }
-                }
+
+                // Our own picture wears its id and nothing else: the date is drawn on
+                // its own line above the caption and the resolution suffix describes
+                // the download, not the photograph. LoadTitles puts the real title
+                // back whenever favorites.txt still has one - it is the collections
+                // carried over from another machine that end up wearing the id.
+                string title = IsOurFileName(name, imageId)
+                    ? imageId
+                    : dated
+                        ? StripDate(name, dateStart, dateLength)
+                        : name;
 
                 string displayDate = sortKey.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
@@ -572,6 +565,30 @@ internal static class Favorites
     }
 
     /// <summary>
+    /// Whether a name is one this program wrote, rather than one that merely parses
+    /// like it.
+    ///
+    /// <para>
+    /// BingImageInfo.TryParseFileName asks only for date_middle_suffix, which
+    /// 20250101_a_beach.jpg satisfies as readily as one of ours - and reading "a" out
+    /// of it as an image id would throw away half of the name the user chose. The
+    /// resolution suffix is the part no one types by accident, so it is what the
+    /// caption trusts. The looser test still decides which context menu an entry
+    /// gets: what may move back to wallpapers\ is a question about where a file can
+    /// go, not about what to call it.
+    /// </para>
+    /// </summary>
+    private static bool IsOurFileName(string name, string imageId)
+        => imageId.Length > 0
+            && (EndsWithSegment(name, AppConfig.ResolutionToString(ResolutionKind.Uhd))
+                || EndsWithSegment(name, AppConfig.ResolutionToString(ResolutionKind.FullHd)));
+
+    private static bool EndsWithSegment(string name, string suffix)
+        => name.Length > suffix.Length
+            && name[name.Length - suffix.Length - 1] == '_'
+            && string.CompareOrdinal(name, name.Length - suffix.Length, suffix, 0, suffix.Length) == 0;
+
+    /// <summary>
     /// Pulls a date out of a file name: 20250101, 2025-01-01 or 2025_01_01 - and,
     /// with a separator, single digit fields as well (2025-1-1) - anywhere in the
     /// name and with anything around it. IMG_20250101_120000.jpg is what a camera or
@@ -762,9 +779,9 @@ internal static class Favorites
     /// Nothing else is touched - no case changes, no underscores turned into spaces.
     /// The caption is the only thing on screen that resembles the file name, and it
     /// has to stay recognisable when the user goes looking for the picture in
-    /// Explorer. For the same reason a name that was nothing but its date keeps it:
-    /// 20250101.jpg has no other name to show, and a blank caption reads as a bug
-    /// rather than as an absence.
+    /// Explorer. For the same reason a name that has nothing left worth showing keeps
+    /// the whole of itself: 20250101.jpg has no other name, and a blank caption reads
+    /// as a bug rather than as an absence.
     /// </para>
     /// </summary>
     private static string StripDate(string name, int start, int length)
@@ -772,35 +789,70 @@ internal static class Favorites
         int headStart = TrimSeparators(name, 0, start, out int headEnd);
         int tailStart = TrimSeparators(name, start + length, name.Length, out int tailEnd);
 
-        bool hasHead = headEnd > headStart;
-        bool hasTail = tailEnd > tailStart;
-        if (!hasHead && !hasTail)
+        string head = headEnd > headStart
+            ? name.Substring(headStart, headEnd - headStart)
+            : string.Empty;
+        string tail = tailEnd > tailStart
+            ? name.Substring(tailStart, tailEnd - tailStart)
+            : string.Empty;
+
+        string stripped;
+        if (head.Length == 0 || tail.Length == 0)
         {
-            return name;
+            stripped = head.Length == 0 ? tail : head;
+        }
+        else
+        {
+            // The separator that followed the date, or the one that preceded it, or -
+            // when the date sat between two ordinary characters, as in "abc20250101x"
+            // - nothing at all, because nothing was there to begin with.
+            int after = start + length;
+            string joint = after < name.Length && IsSeparator(name[after])
+                ? name.Substring(after, 1)
+                : IsSeparator(name[start - 1])
+                    ? name.Substring(start - 1, 1)
+                    : string.Empty;
+
+            stripped = string.Concat(head, joint, tail);
         }
 
-        if (!hasTail)
+        return IsWorthShowing(stripped) ? stripped : name;
+    }
+
+    /// <summary>
+    /// Whether what the date left behind is a name at all: one part of it has to be
+    /// longer than a market code.
+    ///
+    /// <para>
+    /// A picture some other downloader named is the case this exists for -
+    /// 20210603-zh.jpg, 20210603-zh-cn.jpg - where every part left over is a locale
+    /// or a sequence number and says less than the file name it would replace. So the
+    /// test runs per part rather than over the whole string, which is what tells
+    /// "zh-cn" from "a_beach".
+    /// </para>
+    /// <para>
+    /// Two characters of anything but ASCII are a word rather than a code - 台北 is a
+    /// place - so the alphabet decides as much as the length does.
+    /// </para>
+    /// </summary>
+    private static bool IsWorthShowing(string stripped)
+    {
+        int run = 0;
+        foreach (char c in stripped)
         {
-            return name.Substring(headStart, headEnd - headStart);
+            if (c > 127)
+            {
+                return true;
+            }
+
+            run = IsSeparator(c) ? 0 : run + 1;
+            if (run > ShortestAsciiCode)
+            {
+                return true;
+            }
         }
 
-        string tail = name.Substring(tailStart, tailEnd - tailStart);
-        if (!hasHead)
-        {
-            return tail;
-        }
-
-        // The separator that followed the date, or the one that preceded it, or -
-        // when the date sat between two ordinary characters, as in "abc20250101x" -
-        // nothing at all, because nothing was there to begin with.
-        int after = start + length;
-        string joint = after < name.Length && IsSeparator(name[after])
-            ? name.Substring(after, 1)
-            : IsSeparator(name[start - 1])
-                ? name.Substring(start - 1, 1)
-                : string.Empty;
-
-        return string.Concat(name.Substring(headStart, headEnd - headStart), joint, tail);
+        return false;
     }
 
     /// <summary>
