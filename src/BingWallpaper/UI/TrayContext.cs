@@ -49,6 +49,28 @@ internal sealed class TrayContext : ApplicationContext
     private PickerForm? _pickerForm;
     private bool _busy;
 
+    /// <summary>
+    /// Which list the two stepping rows walk: favorites\ when set, the 8 day window
+    /// when not.
+    ///
+    /// <para>
+    /// It has to be remembered rather than worked out, because the two lists overlap.
+    /// Favouriting moves the file but leaves the metadata in <see cref="_images"/>, so
+    /// a picture from three days ago is in both, and asking the folder would answer
+    /// "favourites" for a tile the user clicked on the recent tab. Where the click was
+    /// is the only thing that knows.
+    /// </para>
+    /// <para>
+    /// Chosen in two places, which are the two ways a wallpaper is picked:
+    /// <see cref="ApplyFavorite"/> raises it, and <see cref="ApplyIndexAsync"/> -
+    /// everything applied out of <see cref="_images"/> - clears it. The rest only
+    /// clear it when its premise is gone: the pin released, the picture un-favourited,
+    /// or a restart, which is where it starts life as a guess (see
+    /// <see cref="RestorePinnedWallpaper"/>) because it is deliberately not persisted.
+    /// </para>
+    /// </summary>
+    private bool _steppingFavorites;
+
     // File name the two below were read for; empty when nothing is cached.
     private string _pinnedMetadataFor = string.Empty;
     private string? _pinnedTitle;
@@ -247,6 +269,11 @@ internal sealed class TrayContext : ApplicationContext
         _currentIndex = index;
         _appliedPath = path;
         _appliedImage = image;
+
+        // Everything that lands here came out of _images - a refresh, a step through
+        // the window, a tile on the recent tab - so this is where stepping goes back
+        // to the window, whether or not the file happens to sit in favorites\.
+        _steppingFavorites = false;
         UpdateMenuState();
     }
 
@@ -401,6 +428,14 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        // Which list to step through was decided by a click in a session that is over,
+        // and it is deliberately not written to the INI: the folder is the only clue
+        // left here, and a good enough one. The case it cannot tell apart - a
+        // favourite that is also still in the eight day window - needs the pin to be
+        // younger than eight days, while a lock that survived a restart has usually
+        // long left it.
+        _steppingFavorites = Favorites.Contains(_config.PinnedWallpaper);
+
         string path = Paths.ResolveWallpaperFile(_config.PinnedWallpaper);
         if (!File.Exists(path))
         {
@@ -526,6 +561,15 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        if (value.Length == 0)
+        {
+            // Released, so the wallpaper is back under the timer - and the timer's
+            // list is the window. Cleared here rather than left to the apply that
+            // follows, because UpdateMenuState below would otherwise draw one menu
+            // against a folder the pin no longer names.
+            _steppingFavorites = false;
+        }
+
         Logger.Info(value.Length == 0 ? "pin: released" : "pin: set file=" + value);
         UpdateMenuState();
     }
@@ -587,14 +631,14 @@ internal sealed class TrayContext : ApplicationContext
     /// Whether the two menu rows step through favorites\ instead of the 8 day window.
     ///
     /// <para>
-    /// The pin alone is not the test. Picking a day out of the window pins it too (see
-    /// <see cref="ApplyFromPickerAsync"/>), and that picture belongs to the list the
-    /// window is made of rather than to the folder. What redirects the rows is the
-    /// wallpaper being *in* favorites\ - which is also the only place the order they
-    /// would step through exists at all.
+    /// <see cref="_steppingFavorites"/> is the answer; the folder is asked only to
+    /// confirm it. A picture can leave favorites\ without this program applying
+    /// anything - Explorer, or un-favouriting it from the picker - and the order the
+    /// rows would step through then no longer exists, so the click has to fall back
+    /// to the window rather than walk a folder the file is not in.
     /// </para>
     /// </summary>
-    private bool InFavoriteMode => _config.IsPinned && Favorites.Contains(_config.PinnedWallpaper);
+    private bool InFavoriteMode => _steppingFavorites && Favorites.Contains(_config.PinnedWallpaper);
 
     /// <summary>
     /// Moves one picture: -1 goes newer, +1 goes older. Which list is stepped is
@@ -789,6 +833,11 @@ internal sealed class TrayContext : ApplicationContext
         _appliedPath = path;
         _currentIndex = FindImageIndex(fileName);
         _appliedImage = _currentIndex >= 0 ? _images[_currentIndex] : null;
+
+        // The one place stepping switches to the folder, and note it is set even when
+        // FindImageIndex found the picture in the window as well: the click was on the
+        // favourites tab, and that is the whole question.
+        _steppingFavorites = true;
         SetPinned(fileName);
         UpdateMenuState();
         return true;
@@ -815,6 +864,13 @@ internal sealed class TrayContext : ApplicationContext
 
         string path = Paths.ResolveWallpaperFile(fileName);
         _appliedPath = path;
+
+        // Un-favouriting takes the list with it - the picture is back in the daily
+        // cache and there is no folder left to step through. Favouriting does not do
+        // the reverse: starring a picture on the recent tab is not the same as having
+        // gone to the favourites tab to pick one, so the rows stay where they were.
+        _steppingFavorites = _steppingFavorites && Favorites.Contains(fileName);
+
         WallpaperService.Apply(path, _config.Fit);
     }
 
