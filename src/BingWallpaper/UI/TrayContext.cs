@@ -108,7 +108,7 @@ internal sealed class TrayContext : ApplicationContext
             Visible = true,
             ContextMenu = _menu,
         };
-        _tray.DoubleClick += (_, _) => ShowSettings();
+        _tray.DoubleClick += (_, _) => ShowPicker();
 
         // NotifyIcon shows the menu from WM_RBUTTONUP and only raises MouseUp once
         // TrackPopupMenuEx has returned, so this runs with the menu already closed.
