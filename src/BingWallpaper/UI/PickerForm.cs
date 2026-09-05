@@ -461,15 +461,15 @@ internal sealed class PickerForm : Form
         }
     }
 
-    /// <summary>The badge a picture carries, or null when it carries none.</summary>
-    private string? GetBadge(string fileName)
+    /// <summary>The state mark a picture carries, if it carries one.</summary>
+    private TileMark GetMark(string fileName)
     {
         if (!IsApplied(fileName))
         {
-            return null;
+            return TileMark.None;
         }
 
-        return _context.IsPinned ? "已锁定" : "当前";
+        return _context.IsPinned ? TileMark.Pinned : TileMark.Applied;
     }
 
     /// <summary>Whether this picture is, as far as we know, the wallpaper on screen.</summary>
@@ -480,7 +480,9 @@ internal sealed class PickerForm : Form
 
     /// <summary>
     /// The status bar doubles as the place where a title is shown in full - a tile has
-    /// to cut long ones off at its own width.
+    /// to cut long ones off at its own width - and as the caption the corner marks do
+    /// not have: they are icons, the grid has no tooltips, so hovering is what spells
+    /// "已锁定" / "已应用" out.
     /// </summary>
     private void OnHoveredIndexChanged(object? sender, EventArgs e)
     {
@@ -493,7 +495,14 @@ internal sealed class PickerForm : Form
         }
 
         TileInfo info = source.GetInfo(index);
-        _status.Text = info.Date + " · " + info.Title;
+        string state = info.Mark switch
+        {
+            TileMark.Pinned => "已锁定：",
+            TileMark.Applied => "已应用：",
+            _ => string.Empty,
+        };
+
+        _status.Text = state + info.Date + " · " + info.Title;
     }
 
     private ITileSource? CurrentSource => _tabs.SelectedIndex == FavoritesTab ? _favorites : _recent;
@@ -851,7 +860,7 @@ internal sealed class PickerForm : Form
             return new TileInfo(
                 image.DisplayDate,
                 image.DisplayTitle,
-                _owner.GetBadge(fileName),
+                _owner.GetMark(fileName),
                 _owner.IsFavorite(fileName),
                 _bitmaps[index],
                 _failed[index]);
@@ -961,7 +970,7 @@ internal sealed class PickerForm : Form
             return new TileInfo(
                 item.DisplayDate,
                 item.Title,
-                _owner.GetBadge(item.FileName),
+                _owner.GetMark(item.FileName),
 
                 // No star here: everything on this tab is a favourite, so a mark on
                 // every tile would say nothing.

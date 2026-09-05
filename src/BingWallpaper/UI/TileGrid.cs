@@ -6,14 +6,27 @@ using BingWallpaper.Theme;
 
 namespace BingWallpaper.UI;
 
+/// <summary>What a picture is to the desktop right now.</summary>
+internal enum TileMark
+{
+    /// <summary>Not the wallpaper on screen.</summary>
+    None,
+
+    /// <summary>On screen, and the rotation is free to replace it.</summary>
+    Applied,
+
+    /// <summary>On screen and held there - the rotation will not touch it.</summary>
+    Pinned,
+}
+
 /// <summary>Everything the grid needs in order to paint one tile.</summary>
 internal readonly struct TileInfo
 {
-    public TileInfo(string date, string title, string? badge, bool starred, Image? thumbnail, bool thumbnailFailed)
+    public TileInfo(string date, string title, TileMark mark, bool starred, Image? thumbnail, bool thumbnailFailed)
     {
         Date = date;
         Title = title;
-        Badge = badge;
+        Mark = mark;
         Starred = starred;
         Thumbnail = thumbnail;
         ThumbnailFailed = thumbnailFailed;
@@ -23,10 +36,13 @@ internal readonly struct TileInfo
 
     public string Title { get; }
 
-    /// <summary>"当前" / "已锁定", or null for no badge. Top right of the picture.</summary>
-    public string? Badge { get; }
+    /// <summary>State of the picture. Rightmost mark in the top right corner.</summary>
+    public TileMark Mark { get; }
 
-    /// <summary>Whether to mark the tile as favourited. Bottom left, clear of the badge.</summary>
+    /// <summary>
+    /// Whether to mark the tile as favourited. Left of the state mark, or in its slot
+    /// when the picture carries none.
+    /// </summary>
     public bool Starred { get; }
 
     /// <summary>The bitmap to paint, or null while there is none yet.</summary>
@@ -461,15 +477,7 @@ internal sealed class TileGrid : ScrollableControl
         PaintPicture(g, palette, picture, info);
         PaintFrame(g, palette, picture, index, info);
 
-        if (info.Badge is not null)
-        {
-            PaintBadge(g, palette, picture, info.Badge);
-        }
-
-        if (info.Starred)
-        {
-            PaintStar(g, palette, picture);
-        }
+        PaintMarks(g, palette, picture, info);
 
         TextRenderer.DrawText(
             g,
@@ -531,8 +539,8 @@ internal sealed class TileGrid : ScrollableControl
     {
         // No anti aliasing on purpose - see ThemedComboBox for what it does to the
         // corner pixels of a one pixel rectangle. Hover and "current" share one
-        // emphasised frame; the badge is what keeps the two states apart.
-        bool emphasised = index == _hovered || info.Badge is not null;
+        // emphasised frame; the corner mark is what keeps the two states apart.
+        bool emphasised = index == _hovered || info.Mark != TileMark.None;
         Color colour = emphasised ? palette.Accent : palette.Border;
         int width = emphasised ? Math.Max(2, DpiScale.Round(2)) : Math.Max(1, DpiScale.Round(1));
         int inset = width / 2;
@@ -546,55 +554,114 @@ internal sealed class TileGrid : ScrollableControl
             picture.Height - width);
     }
 
-    private void PaintBadge(Graphics g, ThemePalette palette, Rectangle picture, string caption)
+    /// <summary>
+    /// The corner marks: top right, read right to left as the strength drops off -
+    /// what the picture is to the desktop right now, then whether it is a favourite.
+    /// Both are 20px discs on purpose. A text badge is as wide as whatever it says, so
+    /// anything sitting beside one would land on a different x on every tile; equal
+    /// discs make the corner a predictable row.
+    /// </summary>
+    private static void PaintMarks(Graphics g, ThemePalette palette, Rectangle picture, TileInfo info)
     {
-        Size text = TextRenderer.MeasureText(caption, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
-        int padX = DpiScale.Round(6);
-        int padY = DpiScale.Round(3);
-        Rectangle badge = new Rectangle(
-            picture.Right - text.Width - (padX * 2) - DpiScale.Round(4),
-            picture.Top + DpiScale.Round(4),
-            text.Width + (padX * 2),
-            text.Height + (padY * 2));
-
-        using (SolidBrush fill = new SolidBrush(palette.Accent))
+        if (info.Mark == TileMark.None && !info.Starred)
         {
-            g.FillRectangle(fill, badge);
+            return;
         }
 
-        TextRenderer.DrawText(
-            g,
-            caption,
-            Font,
-            badge,
-            palette.GlyphMark,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-    }
-
-    /// <summary>
-    /// The "already favourited" mark, bottom left. Not the top right corner, which the
-    /// "当前" badge already owns - a picture can be both.
-    /// </summary>
-    private static void PaintStar(Graphics g, ThemePalette palette, Rectangle picture)
-    {
         int size = DpiScale.Round(20);
+        int gap = DpiScale.Round(4);
         int inset = DpiScale.Round(4);
-        Rectangle disc = new Rectangle(picture.Left + inset, picture.Bottom - inset - size, size, size);
+        int x = picture.Right - inset - size;
+        int y = picture.Top + inset;
 
         SmoothingMode previous = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        using (SolidBrush fill = new SolidBrush(palette.Accent))
-        {
-            g.FillEllipse(fill, disc);
-        }
-
+        using (SolidBrush disc = new SolidBrush(palette.Accent))
         using (SolidBrush mark = new SolidBrush(palette.GlyphMark))
         {
-            g.FillPolygon(mark, BuildStar(disc), FillMode.Winding);
+            if (info.Mark != TileMark.None)
+            {
+                Rectangle bounds = new Rectangle(x, y, size, size);
+                g.FillEllipse(disc, bounds);
+
+                if (info.Mark == TileMark.Pinned)
+                {
+                    PaintPadlock(g, mark, palette.GlyphMark, bounds);
+                }
+                else
+                {
+                    PaintDot(g, mark, bounds);
+                }
+
+                x -= size + gap;
+            }
+
+            if (info.Starred)
+            {
+                Rectangle bounds = new Rectangle(x, y, size, size);
+                g.FillEllipse(disc, bounds);
+                g.FillPolygon(mark, BuildStar(bounds), FillMode.Winding);
+            }
         }
 
         g.SmoothingMode = previous;
+    }
+
+    /// <summary>
+    /// The "locked" glyph: a padlock, not a pin. Every string in the UI says 锁定 /
+    /// 已锁定, and the Chinese for a pin is 固定 - the picture has to match the word.
+    /// Drawn by hand rather than shipped as an icon: a shackle arc over a rounded body,
+    /// laid out on a 20 unit grid so it scales with whatever the DPI made of the disc.
+    /// </summary>
+    private static void PaintPadlock(Graphics g, Brush mark, Color colour, Rectangle bounds)
+    {
+        float unit = bounds.Width / 20f;
+        float centreX = bounds.X + (bounds.Width / 2f);
+        float bodyWidth = 10f * unit;
+        float bodyHeight = 7f * unit;
+        float radius = 2f * unit;
+
+        // 8 rather than 9, which is where the whole glyph would be centred on the 20
+        // unit box: the body is solid and the shackle is a thin stroke, so a padlock
+        // measured to the middle reads as sitting low. Optical centre over geometric.
+        float bodyTop = bounds.Y + (8f * unit);
+
+        using (GraphicsPath body = new GraphicsPath())
+        {
+            RectangleF box = new RectangleF(centreX - (bodyWidth / 2f), bodyTop, bodyWidth, bodyHeight);
+            body.AddArc(box.Left, box.Top, radius, radius, 180, 90);
+            body.AddArc(box.Right - radius, box.Top, radius, radius, 270, 90);
+            body.AddArc(box.Right - radius, box.Bottom - radius, radius, radius, 0, 90);
+            body.AddArc(box.Left, box.Bottom - radius, radius, radius, 90, 90);
+            body.CloseFigure();
+            g.FillPath(mark, body);
+        }
+
+        // The arc ends exactly on the top edge of the body, so the two shapes meet
+        // without a seam and the shackle needs no separate legs.
+        float shackle = 3.2f * unit;
+        using Pen pen = new Pen(colour, Math.Max(1f, 1.8f * unit))
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+        };
+        g.DrawArc(pen, centreX - shackle, bodyTop - shackle, shackle * 2f, shackle * 2f, 180, 180);
+    }
+
+    /// <summary>
+    /// The "on screen right now" glyph: a solid dot. The quietest of the three marks on
+    /// purpose - it says where the wallpaper is, not that anything is being held.
+    /// </summary>
+    private static void PaintDot(Graphics g, Brush mark, Rectangle bounds)
+    {
+        float size = bounds.Width * 0.4f;
+        g.FillEllipse(
+            mark,
+            bounds.X + ((bounds.Width - size) / 2f),
+            bounds.Y + ((bounds.Height - size) / 2f),
+            size,
+            size);
     }
 
     /// <summary>Ten points of a five pointed star inscribed in <paramref name="bounds"/>.</summary>
