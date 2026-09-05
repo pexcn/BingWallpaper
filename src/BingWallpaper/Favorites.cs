@@ -36,7 +36,11 @@ internal readonly struct FavoriteItem
     /// <summary>Name inside favorites\, and the key of everything else.</summary>
     public string FileName { get; }
 
-    /// <summary>What to show under the picture; the file name when nothing better is known.</summary>
+    /// <summary>
+    /// What to show under the picture: the Bing title, or the file name with the date
+    /// taken out of it - the tile draws the date on its own line - when that is all
+    /// there is to go on.
+    /// </summary>
     public string Title { get; }
 
     /// <summary>Bing's "see this picture" URL, or empty - it cannot be derived.</summary>
@@ -135,27 +139,48 @@ internal static class Favorites
                     continue;
                 }
 
-                bool isBing = BingImageInfo.TryParseFileName(file.Name, out string startDate, out _);
+                bool isBing = BingImageInfo.TryParseFileName(file.Name, out string startDate, out string imageId);
                 DateTime sortKey;
-                if (isBing && DateTime.TryParseExact(
-                        startDate,
-                        "yyyyMMdd",
-                        CultureInfo.InvariantCulture,
-                        DateTimeStyles.None,
-                        out DateTime published))
+                string title;
+
+                if (isBing)
                 {
-                    sortKey = published;
+                    // The id alone, not the whole name: the date is drawn on its own
+                    // line above the caption and the resolution suffix is ours, not
+                    // anything the picture is about. LoadTitles replaces this with the
+                    // real title whenever favorites.txt still has one - it is the
+                    // pictures carried over from another machine that end up wearing
+                    // this.
+                    title = imageId;
+                    if (!DateTime.TryParseExact(
+                            startDate,
+                            "yyyyMMdd",
+                            CultureInfo.InvariantCulture,
+                            DateTimeStyles.None,
+                            out sortKey))
+                    {
+                        sortKey = file.LastWriteTime;
+                    }
                 }
-                else if (!TryParseDateInName(file.Name, out sortKey))
+                else
                 {
-                    sortKey = file.LastWriteTime;
+                    string name = Path.GetFileNameWithoutExtension(file.Name);
+                    if (TryParseDateInName(name, out sortKey, out int dateStart, out int dateLength))
+                    {
+                        title = StripDate(name, dateStart, dateLength);
+                    }
+                    else
+                    {
+                        sortKey = file.LastWriteTime;
+                        title = name;
+                    }
                 }
 
                 string displayDate = sortKey.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
                 items.Add(new FavoriteItem(
                     file.Name,
-                    Path.GetFileNameWithoutExtension(file.Name),
+                    title,
                     string.Empty,
                     displayDate,
                     isBing,
@@ -565,10 +590,19 @@ internal static class Favorites
     /// tried, and they still have to be a real calendar date. Trailing digits are
     /// allowed - "20250101120000" is a timestamp, not a fourteen digit number.
     /// </para>
+    /// <para>
+    /// The span that matched comes back with the date because <see cref="StripDate"/>
+    /// cuts exactly it out of the caption: one parse decides both what the date is
+    /// and what the name still says, so the two can never disagree about which
+    /// characters were the date.
+    /// </para>
     /// </summary>
-    private static bool TryParseDateInName(string fileName, out DateTime date)
+    private static bool TryParseDateInName(
+        string name,
+        out DateTime date,
+        out int start,
+        out int length)
     {
-        string name = Path.GetFileNameWithoutExtension(fileName);
         for (int i = 0; i + 8 <= name.Length; i++)
         {
             if (i > 0 && IsDigit(name[i - 1]))
@@ -576,13 +610,17 @@ internal static class Favorites
                 continue;
             }
 
-            if (TryReadDate(name, i, out date))
+            if (TryReadDate(name, i, out date, out int end))
             {
+                start = i;
+                length = end - i;
                 return true;
             }
         }
 
         date = default(DateTime);
+        start = 0;
+        length = 0;
         return false;
     }
 
@@ -599,9 +637,10 @@ internal static class Favorites
     /// would allocate is thrown away on the very next line.
     /// </para>
     /// </summary>
-    private static bool TryReadDate(string name, int start, out DateTime date)
+    private static bool TryReadDate(string name, int start, out DateTime date, out int end)
     {
         date = default(DateTime);
+        end = start;
 
         if (!TryReadNumber(name, start, 4, out int year))
         {
@@ -629,12 +668,21 @@ internal static class Favorites
             {
                 return false;
             }
+
+            end = afterDay;
         }
-        else if (start + 8 > name.Length ||
-            !TryReadNumber(name, start + 4, 2, out month) ||
-            !TryReadNumber(name, start + 6, 2, out day))
+        else
         {
-            return false;
+            if (start + 8 > name.Length ||
+                !TryReadNumber(name, start + 4, 2, out month) ||
+                !TryReadNumber(name, start + 6, 2, out day))
+            {
+                return false;
+            }
+
+            // The eight digits, and only those: a timestamp carries its time along
+            // behind them and that is part of the caption, not part of the date.
+            end = start + 8;
         }
 
         if (year < MinNameYear || month < 1 || month > 12 ||
@@ -698,6 +746,90 @@ internal static class Favorites
     /// are not what the arithmetic above means by a digit.
     /// </summary>
     private static bool IsDigit(char c) => c >= '0' && c <= '9';
+
+    /// <summary>
+    /// Takes the date back out of a name, for the caption.
+    ///
+    /// <para>
+    /// The tile draws the date on its own line above the title, so a title that
+    /// repeats it says nothing twice - IMG_20250101_120000 is one date and one
+    /// timestamp, and only the second half is a name. What is left on either side of
+    /// the cut is trimmed of separators and rejoined by one: the separator that
+    /// followed the date, so that a name spaced out as "photo - 2025-01-01 - final"
+    /// does not come back with " - - " in the middle of it.
+    /// </para>
+    /// <para>
+    /// Nothing else is touched - no case changes, no underscores turned into spaces.
+    /// The caption is the only thing on screen that resembles the file name, and it
+    /// has to stay recognisable when the user goes looking for the picture in
+    /// Explorer. For the same reason a name that was nothing but its date keeps it:
+    /// 20250101.jpg has no other name to show, and a blank caption reads as a bug
+    /// rather than as an absence.
+    /// </para>
+    /// </summary>
+    private static string StripDate(string name, int start, int length)
+    {
+        int headStart = TrimSeparators(name, 0, start, out int headEnd);
+        int tailStart = TrimSeparators(name, start + length, name.Length, out int tailEnd);
+
+        bool hasHead = headEnd > headStart;
+        bool hasTail = tailEnd > tailStart;
+        if (!hasHead && !hasTail)
+        {
+            return name;
+        }
+
+        if (!hasTail)
+        {
+            return name.Substring(headStart, headEnd - headStart);
+        }
+
+        string tail = name.Substring(tailStart, tailEnd - tailStart);
+        if (!hasHead)
+        {
+            return tail;
+        }
+
+        // The separator that followed the date, or the one that preceded it, or -
+        // when the date sat between two ordinary characters, as in "abc20250101x" -
+        // nothing at all, because nothing was there to begin with.
+        int after = start + length;
+        string joint = after < name.Length && IsSeparator(name[after])
+            ? name.Substring(after, 1)
+            : IsSeparator(name[start - 1])
+                ? name.Substring(start - 1, 1)
+                : string.Empty;
+
+        return string.Concat(name.Substring(headStart, headEnd - headStart), joint, tail);
+    }
+
+    /// <summary>
+    /// Narrows [<paramref name="start"/>, <paramref name="end"/>) to what it holds
+    /// besides separators. Indices rather than String.Trim so that the two halves of
+    /// a name cost one string each in the end, not one per step.
+    /// </summary>
+    private static int TrimSeparators(string name, int start, int end, out int trimmedEnd)
+    {
+        while (start < end && IsSeparator(name[start]))
+        {
+            start++;
+        }
+
+        while (end > start && IsSeparator(name[end - 1]))
+        {
+            end--;
+        }
+
+        trimmedEnd = end;
+        return start;
+    }
+
+    /// <summary>
+    /// What a file name puts between its parts. The dot is in here because the
+    /// extension is already gone by this point, so any that is left is a separator
+    /// like the rest.
+    /// </summary>
+    private static bool IsSeparator(char c) => c == '_' || c == '-' || c == '.' || c == ' ';
 
     private static bool IsPicture(string fileName)
     {
