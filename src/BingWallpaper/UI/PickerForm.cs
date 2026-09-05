@@ -481,7 +481,7 @@ internal sealed class PickerForm : Form
             }
 
             SetStatus(_favoriteItems.Count == 0
-                ? "收藏夹是空的。在「最近」里右键任意一张即可收藏。"
+                ? "收藏夹为空。"
                 : "共 " + _favoriteItems.Count.ToString(CultureInfo.InvariantCulture) +
                   " 张，占用 " + FormatSize(bytes) + "。");
             return;
@@ -1018,7 +1018,7 @@ internal sealed class PickerForm : Form
 
         public int Count => _items.Count;
 
-        public string EmptyText => "收藏夹是空的。\r\n在「最近」里右键任意一张即可收藏，也可以把图片直接拷进 wallpapers\\favorites\\。";
+        public string EmptyText => "收藏夹是空的。\r\n在「最近」里右键任意一张即可收藏，也可以把图片直接放进 wallpapers\\favorites\\ 目录。";
 
         public TileInfo GetInfo(int index)
         {
