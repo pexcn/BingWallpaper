@@ -22,12 +22,26 @@
 
 任何改动都不得破坏这三条：
 
-1. **程序代码里不存在指向 `favorites\` 下任何路径的 `File.Delete` / `FileInfo.Delete`。**
+1. **程序代码里不存在删除 `favorites\` 下*图片文件*的调用。**
    「永不删除」应当是结构性保证，而不是某处的一句 `if (isFavorite) continue;`——后者太容易
-   在将来某次重构里被绕过。这条**没有例外**：缩略图缓存放在 `favorites\` 外面，正是为了
-   让这句话能说满，README 里也不用写「（某某除外）」。
+   在将来某次重构里被绕过。缩略图缓存放在 `favorites\` 外面，正是为了不给这条留缺口。
    现成的保证：`WallpaperService.Cleanup` 和 `RemoveStaleResolutions` 已经是
    `SearchOption.TopDirectoryOnly`（`WallpaperService.cs:113`、`:191`），子目录天然够不着。
+
+   **允许触碰 `favorites\` 的操作只有三种，此外任何写入 / 删除都是 bug：**
+   1. 把一张图 move **进来**（收藏）；
+   2. 把一张 **Bing** 图 move **出去**（取消收藏，见第 2 条）；
+   3. 原子替换 `favorites.txt` 本身。
+
+   第 3 条为什么不能像缩略图那样挪到目录外：`favorites.txt` 必须跟它描述的文件同处一室，
+   整个目录拷走才是一份自带元数据的备份。它的 `.tmp` 就放在 `favorites\` 里，改名时
+   `Paths.MoveOverwrite` 的降级分支会 `File.Delete` 掉旧的 `favorites.txt`——**所以这条
+   不变量说的是「图片文件」而不是「任何路径」**，写成后者会与自己的实现打架。
+   一句话的判据仍然成立：**没有任何一条代码路径能删掉 `favorites\` 下的一张图。**
+
+   另：写 `favorites.txt.tmp` 要在 `finally` 里兜底删一次残留（TODO2 第 9 条踩过同样的坑：
+   `.jpg.tmp` 只在下次尝试开头才删，失败四次就永久留在目录里）。`favorites\` 的清理故事是
+   「我们从不在这里删东西」，更不能让自己的临时文件堆在这儿。
 2. **取消收藏也不删文件。** 但**只有 Bing 图能移回 `wallpapers\`**：它移回去、从 `favorites.txt`
    移除该行，之后按普通缓存的规则老去，这是对的。
    **用户自己拷进来的图不提供「取消收藏」**——右键菜单只给「在资源管理器中显示」，让用户
