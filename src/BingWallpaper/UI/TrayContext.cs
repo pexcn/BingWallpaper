@@ -976,18 +976,20 @@ internal sealed class TrayContext : ApplicationContext
         }
         else if (pinned && _appliedPath is not null)
         {
-            // Locked long enough to have left the eight day window, so the file name is
-            // all the metadata there is - unless the picture is a favourite, in which
-            // case its title was written down on the day it still had one. Described
-            // twice on purpose: the menu row brackets the date, the tooltip is the one
-            // place that stays silent about the lock.
-            string menu = _pinnedTitle is null
-                ? DescribeWallpaperFile(_config.PinnedWallpaper, locked: true)
-                : BracketDate(DescribeWallpaperDate(_config.PinnedWallpaper), locked: true) + " · " + _pinnedTitle;
-
-            _titleItem.Text = EscapeMnemonic(Truncate(menu, 48));
+            // Locked long enough to have left the eight day window, so the file itself
+            // is all the metadata there is - unless the picture is a favourite, in
+            // which case its title was written down on the day it still had one.
+            // Described twice on purpose: the menu row brackets the date, the tooltip
+            // is the one place that stays silent about the lock.
+            //
+            // _appliedPath rather than the pinned file name: the two name the same
+            // picture, and this is the one of them that already knows which folder it
+            // ended up in, which the write time has to be read from.
+            _titleItem.Text = EscapeMnemonic(Truncate(
+                DescribeWallpaper(_appliedPath, _pinnedTitle, locked: true),
+                48));
             _tray.Text = Truncate(
-                "必应壁纸 · " + (_pinnedTitle ?? DescribeWallpaperFile(_config.PinnedWallpaper, locked: false)),
+                "必应壁纸 · " + (_pinnedTitle ?? DescribeWallpaper(_appliedPath, null, locked: false)),
                 63);
         }
         else if (!_busy)
@@ -1180,28 +1182,41 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Menu caption for a picture whose metadata is out of reach: the file name
-    /// still carries the date it was published on.
+    /// Menu caption for a picture whose metadata is out of reach: date first, then
+    /// whatever else there is to call it.
+    ///
+    /// <para>
+    /// Described by <see cref="Favorites.DescribeFile"/> rather than by
+    /// BingImageInfo.TryParseFileName, which only knows the three segment name this
+    /// program writes. A picture the user dropped into favorites\ is named however
+    /// they named it, and 20210606.jpg used to fall past every branch here and arrive
+    /// as a bare "20210606" - no date, and no brackets to say it was locked, in
+    /// exactly the case where the user is most likely to be looking. The picker had
+    /// been reading such names for a while; this row now asks it rather than guess.
+    /// </para>
     /// </summary>
-    private static string DescribeWallpaperFile(string fileName, bool locked)
+    /// <param name="title">
+    /// What favorites.txt remembered, when it remembered anything. The name answers
+    /// otherwise, which for one of ours is the image id.
+    /// </param>
+    private static string DescribeWallpaper(string path, string? title, bool locked)
     {
-        if (BingImageInfo.TryParseFileName(fileName, out string startDate, out _))
+        Favorites.DescribeFile(path, out string date, out string named);
+        string caption = string.IsNullOrEmpty(title) ? named : title!;
+
+        // A name that was nothing but its date has no title to put after it: the row
+        // would otherwise say the sixth of June twice.
+        if (caption.Length == 0)
         {
-            return BracketDate(BingImageInfo.FormatDate(startDate), locked) + " 的壁纸";
+            return BracketDate(date, locked) + " 的壁纸";
         }
 
-        // No date to bracket: a name that did not parse is shown as it is, and the
-        // ticked menu row below is what says the wallpaper is locked.
-        return Path.GetFileNameWithoutExtension(fileName);
+        // Only when the write time could not be read either, which leaves nothing to
+        // bracket. The ticked menu row below is then the one thing saying it is locked.
+        return date.Length == 0
+            ? caption
+            : BracketDate(date, locked) + " · " + caption;
     }
-
-    /// <summary>
-    /// The date part of the same name, for the row that has a title to put after it.
-    /// </summary>
-    private static string DescribeWallpaperDate(string fileName)
-        => BingImageInfo.TryParseFileName(fileName, out string startDate, out _)
-            ? BingImageInfo.FormatDate(startDate)
-            : Path.GetFileNameWithoutExtension(fileName);
 
     /// <summary>
     /// Brackets the date of the title row while the wallpaper is locked. The state

@@ -151,23 +151,21 @@ internal static class Favorites
                 // The date a file of ours carries in front of its name is the same
                 // eight digits the scanner reads off any other name, so there is one
                 // parse here rather than two.
-                DateTime sortKey;
-                bool dated = TryParseDateInName(name, out sortKey, out int dateStart, out int dateLength);
+                bool dated = DescribeName(name, imageId, out DateTime sortKey, out string title);
                 if (!dated)
                 {
                     sortKey = file.LastWriteTime;
                 }
 
-                // Our own picture wears its id and nothing else: the date is drawn on
-                // its own line above the caption and the resolution suffix describes
-                // the download, not the photograph. LoadTitles puts the real title
-                // back whenever favorites.txt still has one - it is the collections
-                // carried over from another machine that end up wearing the id.
-                string title = IsOurFileName(name, imageId)
-                    ? imageId
-                    : dated
-                        ? StripDate(name, dateStart, dateLength)
-                        : name;
+                // A name that was nothing but its date keeps the whole of itself here:
+                // the tile draws the date on a line of its own, and a blank caption
+                // under it reads as a bug rather than as an absence. The tray menu has
+                // one line for both and wants the emptiness, which is why this is the
+                // caller's decision and not DescribeName's.
+                if (title.Length == 0)
+                {
+                    title = name;
+                }
 
                 string displayDate = sortKey.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
@@ -565,6 +563,88 @@ internal static class Favorites
     }
 
     /// <summary>
+    /// What one file says about itself, for a caller holding a path rather than the
+    /// whole folder - the tray menu, when a locked picture has aged out of the eight
+    /// day window and there is no metadata left anywhere.
+    ///
+    /// <para>
+    /// Date and title come out of the same two steps <see cref="Scan"/> runs, in the
+    /// same order: the name first, the write time only when the name has no date in
+    /// it. So the two windows cannot disagree about the same file - 20210606.jpg is
+    /// the sixth of June in the picker and has to be the sixth of June in the menu.
+    /// </para>
+    /// </summary>
+    /// <param name="displayDate">
+    /// yyyy-MM-dd; empty only when the file could not be stat'ed either.
+    /// </param>
+    /// <param name="title">
+    /// What the name says besides the date; empty when the date was the whole of it.
+    /// </param>
+    public static void DescribeFile(string path, out string displayDate, out string title)
+    {
+        string fileName = Path.GetFileName(path);
+        BingImageInfo.TryParseFileName(fileName, out _, out string imageId);
+
+        bool dated =
+            DescribeName(Path.GetFileNameWithoutExtension(fileName), imageId, out DateTime date, out title)
+            || TryReadWriteTime(path, out date);
+
+        displayDate = dated
+            ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : string.Empty;
+    }
+
+    /// <summary>
+    /// The fallback <see cref="Scan"/> gets for free from the directory entry it is
+    /// already holding. Read from the disk here, and only once the name has turned
+    /// out to carry no date - which keeps the menu off the disk for every name that
+    /// does, and those are almost all of them.
+    /// </summary>
+    private static bool TryReadWriteTime(string path, out DateTime date)
+    {
+        try
+        {
+            date = File.GetLastWriteTime(path);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("favorites: reading the write time failed file="
+                + Path.GetFileName(path) + " error=" + ex.Message);
+            date = default(DateTime);
+            return false;
+        }
+
+        // GetLastWriteTime answers 1601 for a file it could not stat rather than
+        // throwing, and 1601 is not a date to put in a menu.
+        return date.Year >= MinNameYear;
+    }
+
+    /// <summary>
+    /// Splits a name into the date it carries and whatever else it says.
+    ///
+    /// <para>
+    /// Our own picture wears its id and nothing else: the date is drawn separately
+    /// and the resolution suffix describes the download, not the photograph.
+    /// <see cref="LoadTitles"/> puts the real title back whenever favorites.txt still
+    /// has one - it is the collections carried over from another machine that end up
+    /// wearing the id.
+    /// </para>
+    /// </summary>
+    /// <returns>
+    /// Whether a date was found; <paramref name="date"/> says nothing when not.
+    /// </returns>
+    private static bool DescribeName(string name, string imageId, out DateTime date, out string title)
+    {
+        bool dated = TryParseDateInName(name, out date, out int start, out int length);
+        title = IsOurFileName(name, imageId)
+            ? imageId
+            : dated
+                ? StripDate(name, start, length)
+                : name;
+        return dated;
+    }
+
+    /// <summary>
     /// Whether a name is one this program wrote, rather than one that merely parses
     /// like it.
     ///
@@ -779,9 +859,10 @@ internal static class Favorites
     /// Nothing else is touched - no case changes, no underscores turned into spaces.
     /// The caption is the only thing on screen that resembles the file name, and it
     /// has to stay recognisable when the user goes looking for the picture in
-    /// Explorer. For the same reason a name that has nothing left worth showing keeps
-    /// the whole of itself: 20250101.jpg has no other name, and a blank caption reads
-    /// as a bug rather than as an absence.
+    /// Explorer. A name with nothing left worth showing comes back empty - 20250101.jpg
+    /// has no other name - and what goes there instead is the caller's to decide,
+    /// because the two callers want different things: the picker repeats the file name
+    /// rather than draw a blank line, the tray menu says "的壁纸".
     /// </para>
     /// </summary>
     private static string StripDate(string name, int start, int length)
@@ -816,7 +897,7 @@ internal static class Favorites
             stripped = string.Concat(head, joint, tail);
         }
 
-        return IsWorthShowing(stripped) ? stripped : name;
+        return IsWorthShowing(stripped) ? stripped : string.Empty;
     }
 
     /// <summary>
