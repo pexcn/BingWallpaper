@@ -985,11 +985,17 @@ internal sealed class TrayContext : ApplicationContext
             // _appliedPath rather than the pinned file name: the two name the same
             // picture, and this is the one of them that already knows which folder it
             // ended up in, which the write time has to be read from.
+            //
+            // Described once for both rows: they differ only in the brackets, and a
+            // name with no date in it costs a stat to describe - twice would be twice.
+            Favorites.DescribeFile(_appliedPath, out string date, out string named);
+            bool remembered = !string.IsNullOrEmpty(_pinnedTitle);
+
             _titleItem.Text = EscapeMnemonic(Truncate(
-                DescribeWallpaper(_appliedPath, _pinnedTitle, locked: true),
+                DescribeWallpaper(date, remembered ? _pinnedTitle! : named, locked: true),
                 48));
             _tray.Text = Truncate(
-                "必应壁纸 · " + (_pinnedTitle ?? DescribeWallpaper(_appliedPath, null, locked: false)),
+                "必应壁纸 · " + (remembered ? _pinnedTitle! : DescribeWallpaper(date, named, locked: false)),
                 63);
         }
         else if (!_busy)
@@ -1195,15 +1201,16 @@ internal sealed class TrayContext : ApplicationContext
     /// been reading such names for a while; this row now asks it rather than guess.
     /// </para>
     /// </summary>
-    /// <param name="title">
-    /// What favorites.txt remembered, when it remembered anything. The name answers
-    /// otherwise, which for one of ours is the image id.
+    /// <param name="date">
+    /// yyyy-MM-dd, or empty when the file could not be dated at all.
     /// </param>
-    private static string DescribeWallpaper(string path, string? title, bool locked)
+    /// <param name="caption">
+    /// What favorites.txt remembered, when it remembered anything. What the name says
+    /// besides the date otherwise, which for one of ours is the image id - and empty
+    /// when the date was the whole of the name.
+    /// </param>
+    private static string DescribeWallpaper(string date, string caption, bool locked)
     {
-        Favorites.DescribeFile(path, out string date, out string named);
-        string caption = string.IsNullOrEmpty(title) ? named : title!;
-
         // A name that was nothing but its date has no title to put after it: the row
         // would otherwise say the sixth of June twice.
         if (caption.Length == 0)
