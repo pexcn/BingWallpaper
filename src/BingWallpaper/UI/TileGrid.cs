@@ -213,7 +213,11 @@ internal sealed class TileGrid : ScrollableControl
         int lines = SystemInformation.MouseWheelScrollLines;
         int step = lines < 0
             ? Math.Max(1, ClientSize.Height - CellHeight) // "one screen at a time"
-            : Math.Max(1, lines * (CellHeight / 3));
+            // A row counts as three lines, so the default setting of three moves exactly
+            // one row. Multiplied before the division on purpose: dividing first drops
+            // the remainder of a cell height that is not a multiple of three, which at
+            // 96 DPI is two pixels a notch and drifts the grid off the row it started on.
+            : Math.Max(1, lines * CellHeight / 3);
 
         ScrollBy(-delta * step / 120);
     }
