@@ -32,7 +32,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly MenuItem _titleItem;
     private readonly MenuItem _newerItem;
     private readonly MenuItem _olderItem;
-    private readonly MenuItem _historyItem;
+    private readonly MenuItem _pickerItem;
     private readonly MenuItem _refreshItem;
     private readonly MenuItem _pinItem;
     private readonly MenuItem _folderItem;
@@ -46,8 +46,13 @@ internal sealed class TrayContext : ApplicationContext
     private string? _appliedPath;
     private BingImageInfo? _appliedImage;
     private SettingsForm? _settingsForm;
-    private HistoryForm? _historyForm;
+    private PickerForm? _pickerForm;
     private bool _busy;
+
+    // File name the two below were read for; empty when nothing is cached.
+    private string _pinnedMetadataFor = string.Empty;
+    private string? _pinnedTitle;
+    private string? _pinnedLink;
 
     /// <summary>
     /// Set when a trigger arrives while a refresh is running. These used to be dropped,
@@ -87,7 +92,7 @@ internal sealed class TrayContext : ApplicationContext
         _titleItem = new MenuItem("正在获取今日壁纸…", (_, _) => OpenCopyrightLink()) { Enabled = false };
         _newerItem = new MenuItem("下一张", (_, _) => MoveBy(-1)) { Enabled = false };
         _olderItem = new MenuItem("上一张", (_, _) => MoveBy(1)) { Enabled = false };
-        _historyItem = new MenuItem("选择日期...", (_, _) => ShowHistory());
+        _pickerItem = new MenuItem("选择壁纸...", (_, _) => ShowPicker());
         _refreshItem = new MenuItem("立即刷新", (_, _) => StartRefresh(userInitiated: true));
         _pinItem = new MenuItem("锁定当前壁纸", (_, _) => TogglePin()) { Enabled = false };
         _folderItem = new MenuItem("打开壁纸目录", (_, _) => OpenWallpaperFolder());
@@ -137,11 +142,18 @@ internal sealed class TrayContext : ApplicationContext
 
     public BingClient Client => _client;
 
-    /// <summary>Thumbnails of <see cref="Images"/>, kept across history windows.</summary>
+    /// <summary>Thumbnails of <see cref="Images"/>, kept across picker windows.</summary>
     public ThumbnailCache Thumbnails => _thumbnails;
 
     /// <summary>Index into <see cref="Images"/>, or -1 when the wallpaper is not in that list.</summary>
     public int CurrentIndex => _currentIndex;
+
+    /// <summary>
+    /// File name of the wallpaper this program last applied, or null. The picker
+    /// badges a tile by it: the index into <see cref="Images"/> cannot answer for a
+    /// favourite that left the eight day window years ago.
+    /// </summary>
+    public string? AppliedFileName => _appliedPath is null ? null : Path.GetFileName(_appliedPath);
 
     /// <summary>Whether the wallpaper is held against the refresh timer.</summary>
     public bool IsPinned => _config.IsPinned;
@@ -162,7 +174,7 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Shares metadata that the history window fetched on its own, so both windows
+    /// Shares metadata that the picker window fetched on its own, so both windows
     /// index into the same list.
     /// </summary>
     public void AdoptImages(List<BingImageInfo> images)
@@ -198,9 +210,11 @@ internal sealed class TrayContext : ApplicationContext
 
         BingImageInfo image = _images[index];
         Paths.EnsureWallpaperDirectory();
-        string path = Path.Combine(
-            Paths.WallpaperDirectory,
-            image.GetFileName(_config.Resolution));
+
+        // Through the resolver: a favourited picture lives one folder down, and
+        // looking only in the daily cache would download a second copy of a file that
+        // is already on disk.
+        string path = Paths.ResolveWallpaperFile(image.GetFileName(_config.Resolution));
 
         bool cached = File.Exists(path) && new FileInfo(path).Length > 0;
         if (cached)
@@ -209,6 +223,13 @@ internal sealed class TrayContext : ApplicationContext
         }
         else
         {
+            // A download always lands in the daily cache, even when the resolver named
+            // favorites\ - it only did so for a file that turned out to be missing or
+            // empty. Exactly three operations write into favorites\ (a picture moved
+            // in, one of ours moved out, favorites.txt replaced), and downloading is
+            // not one of them: it writes a .tmp and renames over the target, which is
+            // a code path that can delete a picture in there.
+            path = Path.Combine(Paths.WallpaperDirectory, image.GetFileName(_config.Resolution));
             await _client
                 .DownloadImageAsync(image.GetImageUrl(_config.Resolution), path, _shutdown.Token)
                 .ConfigureAwait(true);
@@ -251,7 +272,7 @@ internal sealed class TrayContext : ApplicationContext
             _tray.Dispose();
             _menu.Dispose();
             _settingsForm?.Dispose();
-            _historyForm?.Dispose();
+            _pickerForm?.Dispose();
             _window.Dispose();
             _client.Dispose();
             _shutdown.Dispose();
@@ -268,9 +289,9 @@ internal sealed class TrayContext : ApplicationContext
             ThemeManager.ApplyToForm(_settingsForm);
         }
 
-        if (_historyForm is { IsDisposed: false })
+        if (_pickerForm is { IsDisposed: false })
         {
-            ThemeManager.ApplyToForm(_historyForm);
+            ThemeManager.ApplyToForm(_pickerForm);
         }
     }
 
@@ -328,7 +349,7 @@ internal sealed class TrayContext : ApplicationContext
                 .ConfigureAwait(true);
 
             SetImages(images);
-            _historyForm?.OnImagesRefreshed(images);
+            _pickerForm?.OnImagesRefreshed(images);
 
             if (_config.IsPinned)
             {
@@ -625,11 +646,90 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Applies a history selection (called by HistoryForm). Picking a picture out of
+    /// Applies a selection made in the picker. Picking a picture out of
     /// the window is a deliberate choice, so it pins on its own - unlike stepping
     /// through the list from the tray menu, which is just browsing.
     /// </summary>
-    public Task ApplyFromHistoryAsync(int index) => MoveToAsync(index, pinAfterwards: true);
+    public Task ApplyFromPickerAsync(int index) => MoveToAsync(index, pinAfterwards: true);
+
+    /// <summary>
+    /// Makes sure a picture is in the local cache, downloading it when it is not.
+    /// Favouriting a day nobody applied yet is the one path that needs the file
+    /// without wanting it on the desktop.
+    /// </summary>
+    public async Task<string> EnsureCachedAsync(BingImageInfo image)
+    {
+        Paths.EnsureWallpaperDirectory();
+        string fileName = image.GetFileName(_config.Resolution);
+        string path = Paths.ResolveWallpaperFile(fileName);
+        if (File.Exists(path) && new FileInfo(path).Length > 0)
+        {
+            return path;
+        }
+
+        // Into the daily cache, never into favorites\ - see ApplyIndexAsync.
+        path = Path.Combine(Paths.WallpaperDirectory, fileName);
+        await _client
+            .DownloadImageAsync(image.GetImageUrl(_config.Resolution), path, _shutdown.Token)
+            .ConfigureAwait(true);
+        return path;
+    }
+
+    /// <summary>
+    /// Applies a favourite by file name and pins it (called by the picker).
+    ///
+    /// <para>
+    /// Pinned rather than merely applied, and for a stronger reason than picking a day
+    /// out of the eight day window: a favourite is usually *outside* that window, so
+    /// without the pin the next refresh would put today's picture back an hour later
+    /// and the choice would look like it had been ignored.
+    /// </para>
+    /// </summary>
+    public bool ApplyFavorite(string fileName)
+    {
+        string path = Paths.ResolveWallpaperFile(fileName);
+        if (!File.Exists(path))
+        {
+            Logger.Warn("apply: the favourite is gone file=" + fileName);
+            return false;
+        }
+
+        if (!WallpaperService.Apply(path, _config.Fit))
+        {
+            return false;
+        }
+
+        _appliedPath = path;
+        _currentIndex = FindImageIndex(fileName);
+        _appliedImage = _currentIndex >= 0 ? _images[_currentIndex] : null;
+        SetPinned(fileName);
+        UpdateMenuState();
+        return true;
+    }
+
+    /// <summary>
+    /// Called after a picture moved between wallpapers\ and favorites\.
+    ///
+    /// <para>
+    /// The pin needs nothing here - it stores a bare file name precisely so that
+    /// favouriting cannot break it. What does need saying is the path: this program
+    /// keeps one, and HKCU\Control Panel\Desktop\Wallpaper holds another that now
+    /// names a file which no longer exists. Windows itself has already transcoded the
+    /// picture, so nothing on screen changes; the record is what is being repaired.
+    /// </para>
+    /// </summary>
+    public void NotifyWallpaperMoved(string fileName)
+    {
+        if (_appliedPath is null
+            || !string.Equals(Path.GetFileName(_appliedPath), fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string path = Paths.ResolveWallpaperFile(fileName);
+        _appliedPath = path;
+        WallpaperService.Apply(path, _config.Fit);
+    }
 
     /// <summary>
     /// Whether <paramref name="path"/> is, as far as this program can tell, already
@@ -657,9 +757,62 @@ internal sealed class TrayContext : ApplicationContext
                && string.Equals(registryValue.Trim(), full, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Title and source link of the pinned picture, read back from favorites.txt.
+    ///
+    /// <para>
+    /// This is a third reader of that file, and the only one outside the picker - so
+    /// it is fenced in. It runs when the pin is set, *and* the picture is not in the
+    /// current eight day list, *and* a file of that name is in favorites\: three
+    /// conditions that are rarely all true at once, and none of which opens the file
+    /// to be answered. Without them this would be an unconditional file read on the
+    /// startup path, which is exactly what the favourites are designed not to need.
+    /// </para>
+    /// <para>
+    /// Cached against the file name it was read for, because UpdateMenuState runs on
+    /// every refresh and every menu change while the pin only moves when the user
+    /// moves it.
+    /// </para>
+    /// </summary>
+    private void EnsurePinnedMetadata()
+    {
+        string fileName = _config.PinnedWallpaper;
+        bool eligible = _config.IsPinned && _currentIndex < 0 && Favorites.Contains(fileName);
+        if (!eligible)
+        {
+            _pinnedMetadataFor = string.Empty;
+            _pinnedTitle = null;
+            _pinnedLink = null;
+            return;
+        }
+
+        if (string.Equals(_pinnedMetadataFor, fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _pinnedMetadataFor = fileName;
+        _pinnedTitle = null;
+        _pinnedLink = null;
+        if (Favorites.TryGetMetadata(fileName, out string title, out string link))
+        {
+            _pinnedTitle = title;
+            _pinnedLink = link;
+            Logger.Debug("pin: title recovered from the favourites file=" + fileName);
+        }
+    }
+
+    /// <summary>
+    /// Where "open the image source" goes: the current metadata when there is any, and
+    /// otherwise whatever the favourites file remembered about the pinned picture.
+    /// </summary>
+    private string? CurrentCopyrightLink
+        => string.IsNullOrWhiteSpace(_appliedImage?.CopyrightLink) ? _pinnedLink : _appliedImage!.CopyrightLink;
+
     private void UpdateMenuState()
     {
         bool pinned = _config.IsPinned;
+        EnsurePinnedMetadata();
 
         // The tooltip names the picture and nothing else: whether it is locked is
         // what the menu is for, and repeating it here only eats into the 63
@@ -676,14 +829,18 @@ internal sealed class TrayContext : ApplicationContext
         }
         else if (pinned && _appliedPath is not null)
         {
-            // Locked long enough to have left the eight day window: the file name is
-            // all the metadata there is. Described twice on purpose - the menu row
-            // brackets the date, the tooltip is the one place that stays silent
-            // about the lock.
-            _titleItem.Text = EscapeMnemonic(
-                Truncate(DescribeWallpaperFile(_config.PinnedWallpaper, locked: true), 48));
+            // Locked long enough to have left the eight day window, so the file name is
+            // all the metadata there is - unless the picture is a favourite, in which
+            // case its title was written down on the day it still had one. Described
+            // twice on purpose: the menu row brackets the date, the tooltip is the one
+            // place that stays silent about the lock.
+            string menu = _pinnedTitle is null
+                ? DescribeWallpaperFile(_config.PinnedWallpaper, locked: true)
+                : BracketDate(DescribeWallpaperDate(_config.PinnedWallpaper), locked: true) + " · " + _pinnedTitle;
+
+            _titleItem.Text = EscapeMnemonic(Truncate(menu, 48));
             _tray.Text = Truncate(
-                "必应壁纸 · " + DescribeWallpaperFile(_config.PinnedWallpaper, locked: false),
+                "必应壁纸 · " + (_pinnedTitle ?? DescribeWallpaperFile(_config.PinnedWallpaper, locked: false)),
                 63);
         }
         else if (!_busy)
@@ -698,21 +855,21 @@ internal sealed class TrayContext : ApplicationContext
 
         // Clickable only when there is somewhere to go: no link, or a title that
         // currently says something else, means the row is just a caption.
-        _titleItem.Enabled = !_busy && !string.IsNullOrWhiteSpace(_appliedImage?.CopyrightLink);
+        _titleItem.Enabled = !_busy && !string.IsNullOrWhiteSpace(CurrentCopyrightLink);
 
         // _currentIndex == -1 means the wallpaper is not in the list at all: there is
         // a newer picture to go to, but nothing older.
         _newerItem.Enabled = !_busy && _images.Count > 0 && _currentIndex != 0;
         _olderItem.Enabled = !_busy && _currentIndex >= 0 && _currentIndex < _images.Count - 1;
         _refreshItem.Enabled = !_busy;
-        _historyItem.Enabled = !_busy;
+        _pickerItem.Enabled = !_busy;
 
         _pinItem.Checked = pinned;
         _pinItem.Enabled = !_busy && (pinned || _appliedPath is not null);
 
         // The picker paints the same state on a tile, and it can be open while this
         // runs - stepping through the list from the tray menu moves both badges.
-        _historyForm?.RefreshCurrentMarker();
+        _pickerForm?.RefreshCurrentMarker();
     }
 
     private void ShowSettings()
@@ -730,15 +887,15 @@ internal sealed class TrayContext : ApplicationContext
         ShowForm(_settingsForm);
     }
 
-    private void ShowHistory()
+    private void ShowPicker()
     {
-        if (_historyForm is null || _historyForm.IsDisposed)
+        if (_pickerForm is null || _pickerForm.IsDisposed)
         {
-            _historyForm = new HistoryForm(this);
+            _pickerForm = new PickerForm(this);
         }
 
-        ShowForm(_historyForm);
-        _historyForm.LoadImages(_images);
+        ShowForm(_pickerForm);
+        _pickerForm.LoadImages(_images);
     }
 
     private static void ShowForm(Form form)
@@ -829,7 +986,7 @@ internal sealed class TrayContext : ApplicationContext
 
     private void OpenCopyrightLink()
     {
-        string? link = _appliedImage?.CopyrightLink;
+        string? link = CurrentCopyrightLink;
         if (string.IsNullOrWhiteSpace(link))
         {
             return;
@@ -879,6 +1036,14 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
+    /// The date part of the same name, for the row that has a title to put after it.
+    /// </summary>
+    private static string DescribeWallpaperDate(string fileName)
+        => BingImageInfo.TryParseFileName(fileName, out string startDate, out _)
+            ? BingImageInfo.FormatDate(startDate)
+            : Path.GetFileNameWithoutExtension(fileName);
+
+    /// <summary>
     /// Brackets the date of the title row while the wallpaper is locked. The state
     /// belongs where the eye starts reading, and the ticked "锁定当前壁纸" row right
     /// underneath is what the brackets refer to.
@@ -897,7 +1062,7 @@ internal sealed class TrayContext : ApplicationContext
         new MenuItem("-"),
         _olderItem,
         _newerItem,
-        _historyItem,
+        _pickerItem,
         _refreshItem,
         _pinItem,
         new MenuItem("-"),

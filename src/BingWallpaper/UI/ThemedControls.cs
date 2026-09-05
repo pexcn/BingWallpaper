@@ -663,3 +663,268 @@ internal sealed class ThemedButton : Button
         base.OnLostFocus(e);
     }
 }
+
+/// <summary>
+/// Two or more mutually exclusive segments in one strip - the tab bar of the picker.
+///
+/// <para>
+/// Not a TabControl. That one is drawn by comctl32 down to the tab strip background
+/// and the page border, and no amount of OwnerDrawFixed reaches those two: a dark
+/// window ends up with a light bar across the top of it, and turning the theme off
+/// with SetWindowTheme("", "") falls back to the Windows 95 look. Two toggle buttons
+/// and a panel below cost less than either of those workarounds and follow the
+/// palette the same way the owner drawn radio buttons above do.
+/// </para>
+/// </summary>
+internal sealed class ThemedSegmentedControl : Control
+{
+    private readonly string[] _items;
+
+    private int _selectedIndex;
+    private int _hovered = -1;
+
+    public ThemedSegmentedControl(params string[] items)
+    {
+        _items = items;
+        TabStop = true;
+        SetStyle(
+            ControlStyles.UserPaint
+            | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw
+            | ControlStyles.Selectable,
+            true);
+    }
+
+    public event EventHandler? SelectedIndexChanged;
+
+    public int SelectedIndex
+    {
+        get => _selectedIndex;
+        set
+        {
+            int clamped = Math.Max(0, Math.Min(_items.Length - 1, value));
+            if (_selectedIndex == clamped)
+            {
+                return;
+            }
+
+            _selectedIndex = clamped;
+            Invalidate();
+            SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private static int OuterMargin => DpiScale.Round(8);
+
+    private int SegmentWidth
+    {
+        get
+        {
+            int widest = DpiScale.Round(64);
+            foreach (string item in _items)
+            {
+                Size size = TextRenderer.MeasureText(item, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+                widest = Math.Max(widest, size.Width + DpiScale.Round(28));
+            }
+
+            return widest;
+        }
+    }
+
+    private int SegmentHeight => Font.Height + DpiScale.Round(10);
+
+    public override Size GetPreferredSize(Size proposedSize)
+        => new Size((SegmentWidth * _items.Length) + (OuterMargin * 2), SegmentHeight + (OuterMargin * 2));
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        ThemePalette palette = ThemeManager.Palette;
+        Graphics g = e.Graphics;
+        g.Clear(BackColor);
+
+        int width = SegmentWidth;
+        int height = SegmentHeight;
+        int top = (Height - height) / 2;
+
+        for (int i = 0; i < _items.Length; i++)
+        {
+            Rectangle segment = new Rectangle(OuterMargin + (i * width), top, width, height);
+            bool selected = i == _selectedIndex;
+
+            Color face = selected ? palette.Accent : i == _hovered ? palette.Hover : palette.WindowBackground;
+            using (SolidBrush fill = new SolidBrush(face))
+            {
+                g.FillRectangle(fill, segment);
+            }
+
+            TextRenderer.DrawText(
+                g,
+                _items[i],
+                Font,
+                segment,
+                selected ? palette.GlyphMark : palette.Text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+            // ShowFocusCues for the same reason as the buttons: the strip holds the
+            // focus as soon as the window opens, and a ring there before anyone
+            // touched the keyboard reads as an error.
+            if (selected && Focused && ShowFocusCues)
+            {
+                int inset = DpiScale.Round(3);
+                Rectangle focus = Rectangle.Inflate(segment, -inset, -inset);
+                using Pen pen = new Pen(palette.GlyphMark) { DashStyle = DashStyle.Dot };
+                g.DrawRectangle(pen, focus.X, focus.Y, focus.Width - 1, focus.Height - 1);
+            }
+        }
+
+        // One frame around the whole strip with dividers inside it, rather than a box
+        // per segment: adjacent boxes would double the line between two segments.
+        // No anti aliasing - see ThemedComboBox for what it does to a one pixel frame.
+        Rectangle outline = new Rectangle(OuterMargin, top, width * _items.Length, height);
+        using Pen border = new Pen(palette.Border);
+        g.DrawRectangle(border, outline.X, outline.Y, outline.Width - 1, outline.Height - 1);
+        for (int i = 1; i < _items.Length; i++)
+        {
+            int x = outline.X + (i * width);
+            g.DrawLine(border, x, outline.Top, x, outline.Bottom - 1);
+        }
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        SetHovered(HitTest(e.Location));
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        SetHovered(-1);
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            Focus();
+            int index = HitTest(e.Location);
+            if (index >= 0)
+            {
+                SelectedIndex = index;
+            }
+        }
+
+        base.OnMouseDown(e);
+    }
+
+    /// <summary>Left and right move between the segments, as they do in a tab strip.</summary>
+    protected override bool IsInputKey(Keys keyData) => (keyData & Keys.KeyCode) switch
+    {
+        Keys.Left or Keys.Right => true,
+        _ => base.IsInputKey(keyData),
+    };
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)
+        {
+            e.Handled = true;
+            SelectedIndex = _selectedIndex + (e.KeyCode == Keys.Left ? -1 : 1);
+            return;
+        }
+
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnGotFocus(e);
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnLostFocus(e);
+    }
+
+    private int HitTest(Point location)
+    {
+        int height = SegmentHeight;
+        int top = (Height - height) / 2;
+        if (location.Y < top || location.Y >= top + height || location.X < OuterMargin)
+        {
+            return -1;
+        }
+
+        int index = (location.X - OuterMargin) / SegmentWidth;
+        return index >= 0 && index < _items.Length ? index : -1;
+    }
+
+    private void SetHovered(int index)
+    {
+        if (_hovered == index)
+        {
+            return;
+        }
+
+        _hovered = index;
+        Invalidate();
+    }
+}
+
+/// <summary>
+/// One line of status text along the bottom of a window.
+///
+/// A plain Label would do everything here except arrive in one piece: it erases its
+/// background and then draws its caption, which is two updates on the screen, and
+/// this caption is rewritten every time the mouse crosses a tile. The picker used to
+/// hide that behind WS_EX_COMPOSITED, which it can no longer afford now that the
+/// grid below scrolls - so the flicker is removed where it starts instead.
+///
+/// NoPrefix while it is here: picture titles come from Bing, and "Black &amp; white"
+/// through a Label's mnemonic handling loses its ampersand and underlines the space.
+/// </summary>
+internal sealed class ThemedStatusLabel : Control
+{
+    public ThemedStatusLabel()
+    {
+        TabStop = false;
+        SetStyle(
+            ControlStyles.UserPaint
+            | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw,
+            true);
+        SetStyle(ControlStyles.Selectable, false);
+    }
+
+    protected override void OnTextChanged(EventArgs e)
+    {
+        // UserPaint takes the base class's own repaint path out of the picture.
+        Invalidate();
+        base.OnTextChanged(e);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.Clear(BackColor);
+
+        Rectangle bounds = new Rectangle(
+            Padding.Left,
+            0,
+            Math.Max(0, Width - Padding.Horizontal),
+            Height);
+
+        TextRenderer.DrawText(
+            g,
+            Text,
+            Font,
+            bounds,
+            ThemeManager.Palette.Text,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter
+            | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+    }
+}

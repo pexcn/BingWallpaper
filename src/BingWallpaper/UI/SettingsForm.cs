@@ -153,7 +153,7 @@ internal sealed class SettingsForm : Form
         // SetWindowTheme has something to talk to, and it is still before the reveal.
         ThemeManager.ApplyToForm(this);
 
-        // Same reason as HistoryForm: StartPosition was resolved against the default
+        // Same reason as PickerForm: StartPosition was resolved against the default
         // form size while the handle was created, and FitToContent has moved the
         // bottom right corner since. Centre it again on the size it will be shown at.
         CenterToScreen();
