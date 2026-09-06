@@ -32,6 +32,18 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     private const int MenuTitleLength = 36;
 
+    /// <summary>
+    /// What the title row says while a pass holds the desktop.
+    ///
+    /// <para>
+    /// A constant because leaving the busy state has to be able to recognize its own
+    /// caption. The row is otherwise left as it was found - that is what keeps a
+    /// failure message on screen - and a pass that ends with no picture to name would
+    /// go on claiming to be working until some later apply wrote over it.
+    /// </para>
+    /// </summary>
+    private const string BusyTitle = "正在处理…";
+
     private readonly AppConfig _config;
     private readonly BingClient _client = new();
     private readonly ThumbnailCache _thumbnails;
@@ -224,8 +236,6 @@ internal sealed class TrayContext : ApplicationContext
         // the draw for the fade, which parents a window of its own.
         _window.BeginInvoke(new Action(() =>
         {
-            StartRefresh(userInitiated: false);
-
             // Through the gate rather than starting the timer here: the session
             // listener is attached above, before this action is queued, so a machine
             // that was locked during startup has already posted SetSessionLocked ahead
@@ -235,6 +245,16 @@ internal sealed class TrayContext : ApplicationContext
             {
                 StepShuffle(forward: true);
             }
+
+            // After the step and not before it: StartRefresh runs synchronously up to
+            // its first await, so it has already raised _busy by the time it returns,
+            // and a step taken behind it hits the guard in StepShuffle. Dropped steps
+            // are not retried, so the desktop kept whatever the last session left on it
+            // until the first tick - a whole interval, up to a day - with the menu
+            // greyed out behind BusyTitle the entire time. Nothing is contended by
+            // going first: a refresh in rotation mode only fills the cache, and the
+            // cleanup passes behind it never look inside favorites\.
+            StartRefresh(userInitiated: false);
         }));
     }
 
@@ -1519,12 +1539,28 @@ internal sealed class TrayContext : ApplicationContext
         }
         else if (!_busy)
         {
-            _titleItem.Text = _images.Count == 0 ? "尚未获取到壁纸信息" : _titleItem.Text;
+            // Nothing has reached the desktop this session, so the row can only say
+            // why. Whatever it holds was written by the pass that just ended and is
+            // kept - "刷新失败，详见日志文件" is the one worth keeping - with the one
+            // exception of BusyTitle, which described that pass and does not outlive
+            // it: left standing it tells the user the program is working while nothing
+            // is running, and nothing writes over it until the next apply, which in the
+            // rotation is a whole interval away.
+            if (_images.Count == 0)
+            {
+                _titleItem.Text = "尚未获取到壁纸信息";
+            }
+            else if (string.Equals(_titleItem.Text, BusyTitle, StringComparison.Ordinal))
+            {
+                _titleItem.Text = shuffling && _playlist.Count == 0
+                    ? "收藏夹是空的，无法轮播"
+                    : "尚未应用壁纸，详见日志文件";
+            }
         }
 
         if (_busy)
         {
-            _titleItem.Text = "正在处理…";
+            _titleItem.Text = BusyTitle;
         }
 
         // Clickable only when there is somewhere to go: no link, or a title that
