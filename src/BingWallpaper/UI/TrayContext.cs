@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using BingWallpaper.Theme;
+using Microsoft.Win32;
 
 namespace BingWallpaper.UI;
 
@@ -79,6 +80,18 @@ internal sealed class TrayContext : ApplicationContext
     /// busy for the third of a second it takes.
     /// </summary>
     private bool _applyingFavorite;
+
+    /// <summary>
+    /// Whether the session is locked, which holds the rotation still.
+    ///
+    /// <para>
+    /// A field rather than a plain "stop the timer, start it again", because it is a
+    /// condition and not an event: everything that would otherwise start the timer -
+    /// turning the rotation on, changing its interval, a step made by hand - has to
+    /// see it too, or the pause would be undone by whatever happened to run next.
+    /// </para>
+    /// </summary>
+    private bool _sessionLocked;
 
     /// <summary>
     /// Which list the two stepping rows walk: favorites\ when set, the 8 day window
@@ -184,6 +197,18 @@ internal sealed class TrayContext : ApplicationContext
         _shuffleTimer.Tick += (_, _) => StepShuffle(forward: true);
 
         ThemeManager.ThemeChanged += OnThemeChanged;
+
+        try
+        {
+            // Documented BCL, but it builds a window and a thread of its own the first
+            // time anyone subscribes, and that can fail in a session that has no
+            // desktop to talk to. Degrading here costs the pause and nothing else.
+            SystemEvents.SessionSwitch += OnSessionSwitch;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("shuffle: the session listener could not be attached error=" + ex.Message);
+        }
 
         // Before the first network call: from here on the cleanup passes and the
         // menu have something to work with even while the metadata request is still
@@ -335,6 +360,18 @@ internal sealed class TrayContext : ApplicationContext
             _disposed = true;
             ThemeManager.ThemeChanged -= OnThemeChanged;
 
+            try
+            {
+                // A static event, so the subscription outlives every reference to this
+                // object. Detached before the window below goes, which is what the
+                // handler marshals through.
+                SystemEvents.SessionSwitch -= OnSessionSwitch;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug("shutdown: detaching the session listener failed error=" + ex.Message);
+            }
+
             // A fade still running owns a window parented into Explorer's desktop, on
             // a thread of its own. This ends that thread and waits for it, so the
             // input queue attachment the child window created is gone before the
@@ -378,6 +415,87 @@ internal sealed class TrayContext : ApplicationContext
         if (_pickerForm is { IsDisposed: false })
         {
             ThemeManager.ApplyToForm(_pickerForm);
+        }
+    }
+
+    /// <summary>
+    /// Holds the rotation still while the session is locked.
+    ///
+    /// <para>
+    /// Not for the cost of a change - a few hundred milliseconds of transcode spread
+    /// over an interval measured in minutes is nothing. It is for the round: a
+    /// rotation left running against a locked screen spends its way through a shuffle
+    /// nobody is watching, so what is on the desktop on the way back is whichever
+    /// picture the clock happened to stop on. Paused, the user comes back to the one
+    /// they left, and it gets a full interval from there.
+    /// </para>
+    /// <para>
+    /// The lock and nothing else. Fast user switching and a disconnected remote
+    /// session hide the desktop just as thoroughly and would pause on the same
+    /// reasoning; they are left out because the screen locking on its idle timeout is
+    /// how an unattended machine gets that way, while taking the others on means
+    /// deciding what a session that is disconnected *and* locked does on each of the
+    /// events it can come back through - a pair of states, not one.
+    /// </para>
+    /// </summary>
+    private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
+    {
+        bool locked;
+        switch (e.Reason)
+        {
+            case SessionSwitchReason.SessionLock:
+                locked = true;
+                break;
+
+            case SessionSwitchReason.SessionUnlock:
+                locked = false;
+                break;
+
+            default:
+                return;
+        }
+
+        try
+        {
+            // SystemEvents raises this on a thread of its own, so the timer and the
+            // flag - both of which belong to the UI thread - are reached through the
+            // hidden window, the way the single instance listener reaches ShowSettings.
+            _window.BeginInvoke(new Action(() => SetSessionLocked(locked)));
+        }
+        catch (Exception ex)
+        {
+            // The window is gone, which means the process is on its way out and there
+            // is no rotation left to pause.
+            Logger.Debug("shuffle: the session switch could not be posted error=" + ex.Message);
+        }
+    }
+
+    /// <summary>Applies a session lock or unlock to the rotation, on the UI thread.</summary>
+    private void SetSessionLocked(bool locked)
+    {
+        if (_disposed || _sessionLocked == locked)
+        {
+            return;
+        }
+
+        _sessionLocked = locked;
+
+        // The refresh timer is deliberately left running: it fetches metadata and
+        // prunes the cache, which are worth doing whether or not anyone is looking,
+        // and the only mode where it touches the desktop is the one where the
+        // rotation is off.
+        if (locked)
+        {
+            _shuffleTimer.Stop();
+        }
+        else
+        {
+            RestartShuffleTimer();
+        }
+
+        if (_config.Shuffle)
+        {
+            Logger.Info(locked ? "shuffle: paused, session locked" : "shuffle: resumed, session unlocked");
         }
     }
 
@@ -958,14 +1076,14 @@ internal sealed class TrayContext : ApplicationContext
 
         _playlist.Clear();
         _shuffleTimer.Interval = GetShuffleIntervalMilliseconds();
-        _shuffleTimer.Start();
+        RestartShuffleTimer();
         Logger.Info("shuffle: enabled interval=" + _config.ShuffleIntervalMinutes + "m");
 
         // Before the step and not left to it: the step may find nothing to do, and the
         // tick on the menu row has to be right either way.
         UpdateMenuState();
 
-        if (!StepShuffle(forward: true) && _playlist.Count == 0)
+        if (!_sessionLocked && !StepShuffle(forward: true) && _playlist.Count == 0)
         {
             // A rotation with nothing to rotate does nothing at all, which from the
             // outside is indistinguishable from the click not having registered. Said
@@ -1062,13 +1180,20 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Gives the current picture a full interval. Stop then Start, not Enabled: an
-    /// already running timer keeps counting from where it was, so a step made by hand
-    /// would otherwise be replaced by the rotation moments later.
+    /// Gives the current picture a full interval, when there is a rotation to give it
+    /// to. Stop then Start, not Enabled: an already running timer keeps counting from
+    /// where it was, so a step made by hand would otherwise be replaced by the
+    /// rotation moments later.
+    ///
+    /// <para>
+    /// The single gate every start of the timer goes through, which is what keeps the
+    /// two conditions that hold it still - the rotation being off and the session
+    /// being locked - from having to be repeated at each call site.
+    /// </para>
     /// </summary>
     private void RestartShuffleTimer()
     {
-        if (!_config.Shuffle)
+        if (!_config.Shuffle || _sessionLocked)
         {
             return;
         }
@@ -1511,13 +1636,8 @@ internal sealed class TrayContext : ApplicationContext
             case SettingKind.ShuffleInterval:
                 // Restarted rather than left counting: the new interval should be
                 // measured from now, not from whenever the running one started.
-                _shuffleTimer.Stop();
                 _shuffleTimer.Interval = GetShuffleIntervalMilliseconds();
-                if (_config.Shuffle)
-                {
-                    _shuffleTimer.Start();
-                }
-
+                RestartShuffleTimer();
                 Logger.Debug("shuffle: timer interval=" + _config.ShuffleIntervalMinutes + "m");
                 break;
 
