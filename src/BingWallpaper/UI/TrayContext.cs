@@ -1116,7 +1116,7 @@ internal sealed class TrayContext : ApplicationContext
             _tray.ShowBalloonTip(
                 5000,
                 "随机轮播",
-                "收藏夹是空的。在「选择壁纸」里收藏几张之后才有可以轮播的图片。",
+                "收藏夹是空的。在「选择壁纸」里收藏几张之后才能进行随机轮播。",
                 ToolTipIcon.Info);
         }
     }
