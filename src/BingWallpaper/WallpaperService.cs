@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Microsoft.Win32;
 
 namespace BingWallpaper;
@@ -15,15 +16,76 @@ internal static class WallpaperService
     private const string DesktopKeyPath = @"Control Panel\Desktop";
 
     /// <summary>
-    /// Sets the desktop wallpaper. The style values must be written *before*
-    /// SystemParametersInfoW, otherwise Windows applies the previous style.
+    /// Sets the desktop wallpaper, cutting to it.
+    ///
+    /// <para>
+    /// For the paths that have no fade to run and nothing on screen to keep
+    /// responsive: restoring a pin at startup, repairing the record after a picture
+    /// moved between folders, re-applying the current one in a new fit. Everything
+    /// the user clicks goes through <see cref="ApplyAsync"/> instead.
+    /// </para>
     /// </summary>
     public static bool Apply(string imagePath, WallpaperFit fit)
+    {
+        string? fullPath = SetStyle(imagePath, fit);
+        return fullPath is not null && SetWallpaper(fullPath, fit);
+    }
+
+    /// <summary>
+    /// Sets the desktop wallpaper, crossfading out of the picture that is on the
+    /// desktop right now unless <paramref name="fade"/> says otherwise.
+    ///
+    /// <para>
+    /// <paramref name="previousPath"/> is not what the fade paints - it copies the
+    /// wallpaper layer itself and needs nothing from here. It is what the fade falls
+    /// back to when that copy comes back blank, and what tells a real change apart
+    /// from re-applying the very same picture, which must never fade.
+    /// </para>
+    /// </summary>
+    public static Task<bool> ApplyAsync(string imagePath, WallpaperFit fit, bool fade, string? previousPath)
+    {
+        if (!fade || IsSamePicture(imagePath, previousPath))
+        {
+            return ApplyCoreAsync(imagePath, fit);
+        }
+
+        return WallpaperTransition.RunAsync(previousPath, fit, () => ApplyCoreAsync(imagePath, fit));
+    }
+
+    /// <summary>
+    /// The two steps of an apply, with the slow one off the UI thread.
+    ///
+    /// <para>
+    /// SystemParametersInfoW does not return until Windows has decoded the picture
+    /// all over again, re-encoded it and written TranscodedWallpaper - a couple of
+    /// hundred milliseconds on an idle machine and well past a second on a downclocked
+    /// one. It touches no window of this program, only the registry and a broadcast,
+    /// so nothing holds it on the UI thread. Under a fade the cover is up and opaque
+    /// for the whole wait, which is what turns it from a freeze into idle time.
+    /// </para>
+    /// </summary>
+    private static async Task<bool> ApplyCoreAsync(string imagePath, WallpaperFit fit)
+    {
+        string? fullPath = SetStyle(imagePath, fit);
+        if (fullPath is null)
+        {
+            return false;
+        }
+
+        return await Task.Run(() => SetWallpaper(fullPath, fit)).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Step 1: the style values, which have to be written *before*
+    /// SystemParametersInfoW or Windows applies the previous style. Returns the full
+    /// path for step 2, or null when there is nothing to apply.
+    /// </summary>
+    private static string? SetStyle(string imagePath, WallpaperFit fit)
     {
         if (!File.Exists(imagePath))
         {
             Logger.Error("wallpaper: apply skipped, file missing path=" + imagePath);
-            return false;
+            return null;
         }
 
         string fullPath = Path.GetFullPath(imagePath);
@@ -31,7 +93,6 @@ internal static class WallpaperService
 
         try
         {
-            // Step 1: style first.
             using (RegistryKey? key = Registry.CurrentUser.CreateSubKey(DesktopKeyPath, writable: true))
             {
                 if (key is null)
@@ -44,15 +105,22 @@ internal static class WallpaperService
             }
 
             Logger.Debug("wallpaper: style set fit=" + fit + " wallpaperstyle=" + style + " tilewallpaper=" + tile);
+            return fullPath;
         }
         catch (Exception ex)
         {
             Logger.Error("wallpaper: writing style values failed", ex);
-            return false;
+            return null;
         }
+    }
 
-        // Step 2: tell Windows to load the image. Modern Windows accepts JPEG/PNG
-        // directly, no BMP conversion needed.
+    /// <summary>
+    /// Step 2: tell Windows to load the image. Modern Windows accepts JPEG/PNG
+    /// directly, no BMP conversion needed. This is the part that runs on a thread
+    /// pool thread, so it reads the last error before anything else can overwrite it.
+    /// </summary>
+    private static bool SetWallpaper(string fullPath, WallpaperFit fit)
+    {
         bool ok = NativeMethods.SystemParametersInfoW(
             NativeMethods.SPI_SETDESKWALLPAPER,
             0,
@@ -70,54 +138,33 @@ internal static class WallpaperService
     }
 
     /// <summary>
-    /// Same as <see cref="Apply(string, WallpaperFit)"/>, except that the change
-    /// crossfades out of <paramref name="previousPath"/> - the picture on the desktop
-    /// right now - instead of cutting to the new one.
-    ///
-    /// <para>
-    /// Only Fill fades. The cover has to reproduce the layout Windows is about to
-    /// draw closely enough that removing it is invisible, and Fill is both the default
-    /// and the mode whose rule is a single line worth reproducing. Every other fit, an
-    /// unknown previous picture, a re-apply of the same file, and any failure along
-    /// the way come out here as the plain cut.
-    /// </para>
+    /// Whether the two paths name the same picture - the one change that must not
+    /// fade, since fading a picture into itself is a flicker and nothing else.
     /// </summary>
-    public static bool Apply(string imagePath, WallpaperFit fit, string? previousPath)
+    private static bool IsSamePicture(string imagePath, string? previousPath)
     {
-        if (previousPath is null || !CanFadeFrom(imagePath, fit, previousPath))
+        if (previousPath is null || previousPath.Length == 0)
         {
-            return Apply(imagePath, fit);
-        }
-
-        return WallpaperTransition.Run(previousPath, () => Apply(imagePath, fit));
-    }
-
-    /// <summary>Whether a change to <paramref name="imagePath"/> is worth a fade.</summary>
-    private static bool CanFadeFrom(string imagePath, WallpaperFit fit, string previousPath)
-    {
-        if (fit != WallpaperFit.Fill || previousPath.Length == 0)
-        {
+            // Nothing has been applied yet this session. The fade copies the desktop
+            // rather than a file it has to recognise, so there is still something to
+            // fade out of - the first change after a start gets one too.
             return false;
         }
 
         try
         {
-            if (string.Equals(
-                    Path.GetFullPath(previousPath),
-                    Path.GetFullPath(imagePath),
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                // The same picture applied again - a fade would be a fade to itself.
-                return false;
-            }
+            return string.Equals(
+                Path.GetFullPath(previousPath),
+                Path.GetFullPath(imagePath),
+                StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex)
         {
+            // Cutting is the safe answer to a question that could not be asked: a fade
+            // to the same picture is a visible flicker, a missing fade is not.
             Logger.Warn("fade: comparing the two paths failed error=" + ex.Message);
-            return false;
+            return true;
         }
-
-        return File.Exists(previousPath);
     }
 
     /// <summary>Reads the wallpaper path Windows currently reports (best effort).</summary>

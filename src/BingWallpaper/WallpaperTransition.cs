@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace BingWallpaper;
@@ -31,6 +32,13 @@ namespace BingWallpaper;
 /// fade starts - if anything goes wrong from there, the worst case is a cut.
 /// </para>
 /// <para>
+/// What the cover is painted with is the wallpaper layer's own pixels, copied out
+/// of it with one blit. That is both the cheapest and the most faithful answer: no
+/// file to read, no UHD JPEG to decode, no fit rule to reproduce, and the frame is
+/// identical to what Explorer drew rather than merely close to it. Rendering the
+/// picture from its file is kept only for the case where the copy comes back blank.
+/// </para>
+/// <para>
 /// The alpha is the only thing that moves: the frame is uploaded once and DWM
 /// composes it, so a tick costs one byte rather than a full screen blend.
 /// </para>
@@ -38,28 +46,40 @@ namespace BingWallpaper;
 /// Two costs are worth knowing about. A window parented across a process boundary
 /// attaches the two input queues for as long as it lives, so a wedged Explorer
 /// could wedge this program - the cover exists for about half a second, which is
-/// what makes that acceptable. And the frame is a screen sized bitmap next to the
-/// decoded picture, tens of megabytes on a 4K desktop, which is why both are
-/// released the moment the fade ends rather than kept for the next one.
+/// what makes that acceptable. And the frame is a screen sized bitmap, tens of
+/// megabytes on a 4K desktop, which is why it is released the moment the fade ends
+/// rather than kept for the next one.
 /// </para>
 /// <para>
 /// None of this is documented by Microsoft, so every step is allowed to fail: no
-/// Progman, no WorkerW, no device context, a picture that will not decode - each
-/// one logs and falls back to the plain cut, which is what the program did before.
+/// Progman, no WorkerW, no device context, a blit that returns nothing - each one
+/// logs and falls back to the plain cut, which is what the program did before.
 /// </para>
 /// </summary>
 internal static class WallpaperTransition
 {
     /// <summary>
-    /// How long the cover stays opaque before the fade starts.
+    /// Bounds on how long the cover stays opaque before the fade starts.
+    ///
     /// <para>
     /// SystemParametersInfoW returns once it has transcoded the picture, but Explorer
     /// paints it on its own thread afterwards and says nothing when it is done.
     /// Dropping the alpha before that paint lands would show the *old* wallpaper
     /// through the fade - the one thing this is supposed to hide.
     /// </para>
+    /// <para>
+    /// With nothing to wait for, the hold is guessed from the only measurement on
+    /// hand: how long the transcode itself took. Both run on the same machine at the
+    /// same moment, so a slow transcode is the signal that Explorer's paint will be
+    /// slow too - which is exactly the case a fixed value gets wrong, since it is the
+    /// downclocked machine that needs the longer hold and the idle one that must not
+    /// pay for it.
+    /// </para>
     /// </summary>
-    private const int HoldMilliseconds = 120;
+    private const int MinHoldMilliseconds = 150;
+
+    /// <summary>Upper bound of the hold, see <see cref="MinHoldMilliseconds"/>.</summary>
+    private const int MaxHoldMilliseconds = 500;
 
     /// <summary>How long the fade itself takes.</summary>
     private const int FadeMilliseconds = 380;
@@ -73,29 +93,40 @@ internal static class WallpaperTransition
     private static Cover? _active;
 
     /// <summary>
-    /// Applies a wallpaper under a crossfade from <paramref name="previousPath"/>.
+    /// Applies a wallpaper under a crossfade out of whatever is on the desktop now.
+    ///
     /// <para>
     /// <paramref name="apply"/> is always called exactly once, whether or not the
     /// cover could be built, and its result is passed straight back: a caller cannot
     /// tell the difference between a faded change and a cut, and should not have to.
+    /// It is awaited with the cover up and opaque, which is what lets it move the
+    /// transcode off the UI thread without a frame of the new wallpaper showing.
+    /// </para>
+    /// <para>
+    /// <paramref name="previousPath"/> and <paramref name="fit"/> are only the
+    /// fallback: they describe the outgoing picture well enough to draw it again if
+    /// the wallpaper layer cannot be copied.
     /// </para>
     /// </summary>
-    public static bool Run(string previousPath, Func<bool> apply)
+    public static async Task<bool> RunAsync(string? previousPath, WallpaperFit fit, Func<Task<bool>> apply)
     {
         Cancel();
 
-        Cover? cover = TryCover(previousPath);
+        Cover? cover = TryCover(previousPath, fit);
         if (cover is null)
         {
-            return apply();
+            return await apply().ConfigureAwait(true);
         }
 
         _active = cover;
 
         bool applied;
+        long spent;
         try
         {
-            applied = apply();
+            Stopwatch clock = Stopwatch.StartNew();
+            applied = await apply().ConfigureAwait(true);
+            spent = clock.ElapsedMilliseconds;
         }
         catch
         {
@@ -111,7 +142,7 @@ internal static class WallpaperTransition
             return false;
         }
 
-        cover.Start();
+        cover.Start(Clamp(spent, MinHoldMilliseconds, MaxHoldMilliseconds));
         return true;
     }
 
@@ -121,11 +152,14 @@ internal static class WallpaperTransition
     /// </summary>
     public static void Cancel() => _active?.Dispose();
 
+    private static int Clamp(long value, int min, int max) =>
+        value < min ? min : (value > max ? max : (int)value);
+
     /// <summary>
     /// Builds and shows the cover, or returns null when this machine's desktop is not
     /// the shape this needs. Every failure here is a reason to cut, never to fail.
     /// </summary>
-    private static Cover? TryCover(string previousPath)
+    private static Cover? TryCover(string? previousPath, WallpaperFit fit)
     {
         if (!Application.MessageLoop)
         {
@@ -170,9 +204,26 @@ internal static class WallpaperTransition
                 return null;
             }
 
-            List<Rectangle> monitors = GetMonitors(bounds);
             cover = new Cover(bounds.Size);
-            cover.Render(previousPath, bounds, monitors);
+            cover.CreateSurface();
+
+            string source;
+            if (cover.Capture(host))
+            {
+                source = "capture";
+            }
+            else if (CanRender(previousPath, fit))
+            {
+                cover.Render(previousPath!, bounds, GetMonitors(bounds));
+                source = "render";
+            }
+            else
+            {
+                Logger.Warn("fade: nothing to paint the cover with, cutting instead");
+                cover.Dispose();
+                return null;
+            }
+
             cover.Show(host);
 
             if (Logger.IsEnabled(LogLevel.Debug))
@@ -183,8 +234,7 @@ internal static class WallpaperTransition
                     "fade: covered host=0x" + host.ToInt64().ToString("X", CultureInfo.InvariantCulture) +
                     " size=" + bounds.Width.ToString(CultureInfo.InvariantCulture) +
                     "x" + bounds.Height.ToString(CultureInfo.InvariantCulture) +
-                    " monitors=" + monitors.Count.ToString(CultureInfo.InvariantCulture) +
-                    " from=" + Path.GetFileName(previousPath));
+                    " source=" + source);
             }
 
             return cover;
@@ -205,6 +255,24 @@ internal static class WallpaperTransition
             }
         }
     }
+
+    /// <summary>
+    /// Whether the outgoing picture can be drawn from its file, which is what happens
+    /// when the wallpaper layer could not be copied.
+    ///
+    /// <para>
+    /// Only Fill, and only because this path has to reproduce the layout Explorer drew
+    /// closely enough that putting the cover up is invisible - the very problem the
+    /// copy does not have. Fill is the default and its rule is a single line; every
+    /// other fit falls through to the cut here, which is what the whole fade did
+    /// before the copy existed.
+    /// </para>
+    /// </summary>
+    private static bool CanRender(string? previousPath, WallpaperFit fit) =>
+        previousPath is not null
+        && previousPath.Length > 0
+        && fit == WallpaperFit.Fill
+        && File.Exists(previousPath);
 
     /// <summary>
     /// Finds the window the wallpaper is painted in, which is the one to parent the
@@ -284,7 +352,8 @@ internal static class WallpaperTransition
     /// <summary>
     /// The monitor rectangles, in virtual screen coordinates. Fill is a per monitor
     /// rule, so the frame is drawn one monitor at a time rather than once across the
-    /// whole desktop.
+    /// whole desktop. Only the fallback needs this - a copy of the wallpaper layer
+    /// already has every monitor laid out in it.
     /// </summary>
     private static List<Rectangle> GetMonitors(Rectangle fallback)
     {
@@ -354,6 +423,9 @@ internal static class WallpaperTransition
         private IntPtr _memoryDc;
         private IntPtr _bitmap;
         private IntPtr _replacedBitmap;
+        private int _hold;
+        private int _ticks;
+        private bool _started;
         private bool _disposed;
 
         public Cover(Size size)
@@ -364,16 +436,16 @@ internal static class WallpaperTransition
         }
 
         /// <summary>
-        /// Draws the outgoing picture into a screen compatible bitmap.
+        /// Allocates the screen compatible bitmap the cover is painted from.
         ///
         /// <para>
         /// Compatible with the screen rather than a GDI+ Bitmap on purpose. This is
         /// the only copy of the frame that ever exists - a Bitmap would need a second
         /// one to hand GDI a HBITMAP to blit from, and at a UHD desktop that copy is
-        /// tens of megabytes. Painting is then a single BitBlt.
+        /// tens of megabytes. Painting is then a single BitBlt, and so is filling it.
         /// </para>
         /// </summary>
-        public void Render(string path, Rectangle bounds, List<Rectangle> monitors)
+        public void CreateSurface()
         {
             IntPtr screen = NativeMethods.GetDC(IntPtr.Zero);
             if (screen == IntPtr.Zero)
@@ -401,7 +473,70 @@ internal static class WallpaperTransition
             {
                 NativeMethods.ReleaseDC(IntPtr.Zero, screen);
             }
+        }
 
+        /// <summary>
+        /// Copies the wallpaper layer's own pixels into the surface, and reports
+        /// whether anything came back.
+        ///
+        /// <para>
+        /// This is everything the cover needs and it is already composed: the right
+        /// fit, the right monitor layout, the right resampling, for one blit inside
+        /// video memory instead of a UHD JPEG read, decoded and rescaled on the UI
+        /// thread. The host is a top level window with a redirection surface of its
+        /// own, so what comes back is the wallpaper alone - the icons live in a
+        /// sibling window and every real window is composed above both.
+        /// </para>
+        /// <para>
+        /// Undocumented all the same, and DWM is free to hand back a blank surface for
+        /// a window it composes another way, without saying so. There is no way to ask
+        /// in advance, so the result is sampled instead: a surface that is one flat
+        /// colour is called a failure. A genuinely single coloured wallpaper is
+        /// misjudged by that rule, and pays for it with the fallback path and nothing
+        /// else.
+        /// </para>
+        /// </summary>
+        public bool Capture(IntPtr host)
+        {
+            IntPtr hostDc = NativeMethods.GetDC(host);
+            if (hostDc == IntPtr.Zero)
+            {
+                Logger.Debug("fade: the wallpaper window has no device context");
+                return false;
+            }
+
+            bool copied;
+            try
+            {
+                copied = NativeMethods.BitBlt(
+                    _memoryDc, 0, 0, _size.Width, _size.Height, hostDc, 0, 0, NativeMethods.SRCCOPY);
+            }
+            finally
+            {
+                NativeMethods.ReleaseDC(host, hostDc);
+            }
+
+            if (!copied)
+            {
+                Logger.Debug("fade: copying the wallpaper layer failed");
+                return false;
+            }
+
+            if (!HasDetail())
+            {
+                Logger.Debug("fade: the wallpaper layer came back flat");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Draws the outgoing picture into the surface from its file. The fallback for
+        /// a copy that came back blank - see <see cref="Capture"/> and CanRender.
+        /// </summary>
+        public void Render(string path, Rectangle bounds, List<Rectangle> monitors)
+        {
             // Read the file rather than decode from it: Image.FromStream keeps reading
             // from the stream for as long as the image lives, and this picture is the
             // wallpaper - a locked file is the one thing it must not become.
@@ -475,8 +610,21 @@ internal static class WallpaperTransition
             NativeMethods.DwmFlush();
         }
 
-        public void Start()
+        /// <summary>
+        /// Starts the fade, holding the cover opaque for <paramref name="hold"/> first.
+        /// </summary>
+        public void Start(int hold)
         {
+            if (_disposed)
+            {
+                // Cancelled while the wallpaper was being applied - shutdown, or a
+                // second change on its heels. The window is already gone and the
+                // desktop already shows the new picture.
+                return;
+            }
+
+            _hold = hold;
+            _started = true;
             _clock.Start();
             _timer.Start();
         }
@@ -494,6 +642,18 @@ internal static class WallpaperTransition
             _timer.Tick -= OnTick;
             _timer.Dispose();
             _clock.Stop();
+
+            if (_started && Logger.IsEnabled(LogLevel.Debug))
+            {
+                // ticks is the whole diagnosis when a fade did not appear on screen:
+                // the alpha follows the clock, so one single tick means the timer was
+                // starved for the entire fade and the only tick to arrive found it
+                // already over. WM_TIMER is the lowest priority message there is.
+                Logger.Debug(
+                    "fade: done ticks=" + _ticks.ToString(CultureInfo.InvariantCulture) +
+                    " elapsed=" + _clock.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) +
+                    " hold=" + _hold.ToString(CultureInfo.InvariantCulture));
+            }
 
             // The window first: it is the only thing that paints out of the device
             // context below, and destroying it drops any paint still queued for it.
@@ -559,17 +719,54 @@ internal static class WallpaperTransition
             base.WndProc(ref m);
         }
 
+        /// <summary>
+        /// Whether the captured surface holds more than one colour, sampled on a three
+        /// by three grid inset from the edges. Cheap, and the only question worth
+        /// asking: a copy that DWM refused comes back as one flat colour, usually
+        /// black, and a photograph never does.
+        /// </summary>
+        private bool HasDetail()
+        {
+            uint first = NativeMethods.CLR_INVALID;
+
+            for (int row = 1; row <= 3; row++)
+            {
+                for (int column = 1; column <= 3; column++)
+                {
+                    uint colour = NativeMethods.GetPixel(
+                        _memoryDc, _size.Width * column / 4, _size.Height * row / 4);
+                    if (colour == NativeMethods.CLR_INVALID)
+                    {
+                        return false;
+                    }
+
+                    if (first == NativeMethods.CLR_INVALID)
+                    {
+                        first = colour;
+                    }
+                    else if (colour != first)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         private void OnTick(object? sender, EventArgs e)
         {
             try
             {
+                _ticks++;
+
                 long elapsed = _clock.ElapsedMilliseconds;
-                if (elapsed < HoldMilliseconds)
+                if (elapsed < _hold)
                 {
                     return;
                 }
 
-                double progress = (elapsed - HoldMilliseconds) / (double)FadeMilliseconds;
+                double progress = (elapsed - _hold) / (double)FadeMilliseconds;
                 if (progress >= 1.0)
                 {
                     Dispose();

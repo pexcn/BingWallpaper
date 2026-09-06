@@ -566,7 +566,7 @@ internal sealed class PickerForm : Form
     {
         if (_tabs.SelectedIndex == FavoritesTab)
         {
-            ApplyFavorite(e.Index);
+            StartApplyFavorite(e.Index);
             return;
         }
 
@@ -574,6 +574,8 @@ internal sealed class PickerForm : Form
     }
 
     private void StartApplyRecent(int index) => _ = ApplyRecentAsync(index);
+
+    private void StartApplyFavorite(int index) => _ = ApplyFavoriteAsync(index);
 
     private void StartFavorite(int index) => _ = FavoriteAsync(index);
 
@@ -604,7 +606,7 @@ internal sealed class PickerForm : Form
         }
     }
 
-    private void ApplyFavorite(int index)
+    private async Task ApplyFavoriteAsync(int index)
     {
         if (_busy || index < 0 || index >= _favoriteItems.Count)
         {
@@ -615,9 +617,14 @@ internal sealed class PickerForm : Form
         FavoriteItem item = _favoriteItems[index];
         try
         {
-            SetTransientStatus(_context.ApplyFavorite(item.FileName)
+            SetTransientStatus(await _context.ApplyFavoriteAsync(item.FileName).ConfigureAwait(true)
                 ? "已锁定：" + item.DisplayDate + " · " + item.Title
                 : "应用失败，详见日志文件。");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("picker: applying the selected favourite failed", ex);
+            SetTransientStatus("应用失败，详见日志文件。");
         }
         finally
         {
@@ -732,7 +739,7 @@ internal sealed class PickerForm : Form
 
         List<MenuItem> items = new List<MenuItem>(5)
         {
-            new MenuItem("设为壁纸并锁定", (_, _) => ApplyFavorite(index)) { DefaultItem = true },
+            new MenuItem("设为壁纸并锁定", (_, _) => StartApplyFavorite(index)) { DefaultItem = true },
             new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)),
         };
 

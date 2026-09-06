@@ -74,7 +74,7 @@ internal sealed class TrayContext : ApplicationContext
     /// </para>
     /// <para>
     /// Chosen in two places, which are the two ways a wallpaper is picked:
-    /// <see cref="ApplyFavorite"/> raises it, and <see cref="ApplyIndexAsync"/> -
+    /// <see cref="ApplyFavoriteAsync"/> raises it, and <see cref="ApplyIndexAsync"/> -
     /// everything applied out of <see cref="_images"/> - clears it. The rest only
     /// clear it when its premise is gone: the pin released, the picture un-favourited,
     /// or a restart, which is where it starts life as a guess (see
@@ -233,21 +233,6 @@ internal sealed class TrayContext : ApplicationContext
         _thumbnails.Retain(images);
     }
 
-    /// <summary>
-    /// The picture to crossfade away from, or null when this change should cut.
-    ///
-    /// <para>
-    /// Reading <see cref="_appliedPath"/> before it is overwritten is what makes the
-    /// fade possible at all: the only other record of what is on the desktop is the
-    /// registry value, and that one is not reliable enough to paint from (see
-    /// <see cref="IsCurrentWallpaper"/>) - a wrong picture would show as a jump. Null
-    /// on the paths where there is no such record, which is every apply before this
-    /// program has put a wallpaper up itself: the first refresh after a start, and
-    /// restoring the pin.
-    /// </para>
-    /// </summary>
-    private string? FadeFrom => _config.FadeTransition ? _appliedPath : null;
-
     /// <summary>Downloads (if needed) and applies the image at <paramref name="index"/>.</summary>
     public async Task ApplyIndexAsync(int index, bool force)
     {
@@ -290,7 +275,9 @@ internal sealed class TrayContext : ApplicationContext
         }
         else
         {
-            WallpaperService.Apply(path, _config.Fit, FadeFrom);
+            await WallpaperService
+                .ApplyAsync(path, _config.Fit, _config.FadeTransition, _appliedPath)
+                .ConfigureAwait(true);
         }
 
         _currentIndex = index;
@@ -720,7 +707,9 @@ internal sealed class TrayContext : ApplicationContext
     /// </para>
     /// <para>
     /// Nothing here downloads: a favourite is on disk by definition, so this goes
-    /// through the same synchronous path the picker uses and never raises _busy.
+    /// through the same path the picker uses and never raises _busy. The answer this
+    /// returns is "did the click belong to the folder", which is known before the
+    /// apply behind it finishes - so the apply is started and not waited for.
     /// </para>
     /// </summary>
     private bool MoveWithinFavorites(int delta)
@@ -766,12 +755,29 @@ internal sealed class TrayContext : ApplicationContext
 
         // The call the picker makes, pin included: stepping carries the lock along
         // instead of dropping the wallpaper back under the refresh timer.
-        if (!ApplyFavorite(items[target].FileName))
-        {
-            ErrorDialog.Show("切换壁纸失败", "详见日志文件。");
-        }
-
+        _ = StepIntoFavoriteAsync(items[target].FileName);
         return true;
+    }
+
+    /// <summary>
+    /// Applies one favourite for <see cref="MoveWithinFavorites"/> and reports a
+    /// failure the way the menu has no other way to: nobody is awaiting the task, so
+    /// the dialog has to be raised from inside it.
+    /// </summary>
+    private async Task StepIntoFavoriteAsync(string fileName)
+    {
+        try
+        {
+            if (!await ApplyFavoriteAsync(fileName).ConfigureAwait(true))
+            {
+                ErrorDialog.Show("切换壁纸失败", "详见日志文件。");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("switch: stepping through the favourites failed", ex);
+            ErrorDialog.Show("切换壁纸失败", Logger.Describe(ex));
+        }
     }
 
     private async Task MoveToAsync(int index, bool pinAfterwards)
@@ -846,8 +852,14 @@ internal sealed class TrayContext : ApplicationContext
     /// without the pin the next refresh would put today's picture back an hour later
     /// and the choice would look like it had been ignored.
     /// </para>
+    /// <para>
+    /// Nothing here downloads - a favourite is on disk by definition - but the apply
+    /// itself is awaited all the same: it is what puts SystemParametersInfoW on a
+    /// thread pool thread, which is where a hundreds of milliseconds long transcode
+    /// belongs.
+    /// </para>
     /// </summary>
-    public bool ApplyFavorite(string fileName)
+    public async Task<bool> ApplyFavoriteAsync(string fileName)
     {
         string path = Paths.ResolveWallpaperFile(fileName);
         if (!File.Exists(path))
@@ -856,7 +868,9 @@ internal sealed class TrayContext : ApplicationContext
             return false;
         }
 
-        if (!WallpaperService.Apply(path, _config.Fit, FadeFrom))
+        if (!await WallpaperService
+                .ApplyAsync(path, _config.Fit, _config.FadeTransition, _appliedPath)
+                .ConfigureAwait(true))
         {
             return false;
         }
