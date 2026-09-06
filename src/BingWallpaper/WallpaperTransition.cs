@@ -1,11 +1,8 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Globalization;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -37,8 +34,13 @@ namespace BingWallpaper;
 /// What the cover is painted with is the wallpaper layer's own pixels, copied out
 /// of it with one blit. That is both the cheapest and the most faithful answer: no
 /// file to read, no UHD JPEG to decode, no fit rule to reproduce, and the frame is
-/// identical to what Explorer drew rather than merely close to it. Rendering the
-/// picture from its file is kept only for the case where the copy comes back blank.
+/// identical to what Explorer drew rather than merely close to it. It is also the
+/// only answer - drawing the outgoing picture from its file was how this started,
+/// and it went when the copy proved itself, because reproducing a layout Explorer
+/// owns can only ever be approximately right and there are six of them.
+/// </para>
+/// <para>
+/// So every fit crossfades, and a copy that comes back blank is a cut.
 /// </para>
 /// <para>
 /// The cover lives on a thread of its own, which exists for as long as one fade
@@ -166,13 +168,8 @@ internal static class WallpaperTransition
     /// next. It is also what the user asked for and cheaper than either alternative:
     /// the pictures in between are never drawn, only applied.
     /// </para>
-    /// <para>
-    /// <paramref name="previousPath"/> and <paramref name="fit"/> are only the
-    /// fallback: they describe the outgoing picture well enough to draw it again if
-    /// the wallpaper layer cannot be copied.
-    /// </para>
     /// </summary>
-    public static async Task<bool> RunAsync(string? previousPath, WallpaperFit fit, Func<Task<bool>> apply)
+    public static async Task<bool> RunAsync(Func<Task<bool>> apply)
     {
         Cover? running = GetRunning();
         if (running is not null)
@@ -207,7 +204,7 @@ internal static class WallpaperTransition
             _active = null;
         }
 
-        Cover cover = new Cover(previousPath, fit);
+        Cover cover = new Cover();
         if (!await cover.ShowAsync().ConfigureAwait(true))
         {
             return await apply().ConfigureAwait(true);
@@ -361,80 +358,6 @@ internal static class WallpaperTransition
     }
 
     /// <summary>
-    /// The monitor rectangles, in virtual screen coordinates. Fill is a per monitor
-    /// rule, so the frame is drawn one monitor at a time rather than once across the
-    /// whole desktop. Only the fallback needs this - a copy of the wallpaper layer
-    /// already has every monitor laid out in it.
-    /// </summary>
-    private static List<Rectangle> GetMonitors(Rectangle fallback)
-    {
-        List<Rectangle> monitors = new List<Rectangle>(2);
-
-        bool Visit(IntPtr monitor, IntPtr hdc, ref NativeMethods.RECT rect, IntPtr param)
-        {
-            monitors.Add(Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom));
-            return true;
-        }
-
-        NativeMethods.MonitorEnumProc callback = Visit;
-        NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
-        GC.KeepAlive(callback);
-
-        if (monitors.Count == 0)
-        {
-            // One picture stretched over the whole desktop is not what Windows will
-            // draw on a multi monitor setup, but this only happens when the monitors
-            // could not be listed at all, and a single monitor is the usual case.
-            Logger.Warn("fade: could not list the monitors, covering the desktop as one");
-            monitors.Add(fallback);
-        }
-
-        return monitors;
-    }
-
-    /// <summary>
-    /// Whether the outgoing picture can be drawn from its file, which is what happens
-    /// when the wallpaper layer could not be copied.
-    ///
-    /// <para>
-    /// Only Fill, and only because this path has to reproduce the layout Explorer drew
-    /// closely enough that putting the cover up is invisible - the very problem the
-    /// copy does not have. Fill is the default and its rule is a single line; every
-    /// other fit falls through to the cut here, which is what the whole fade did
-    /// before the copy existed.
-    /// </para>
-    /// </summary>
-    private static bool CanRender(string? previousPath, WallpaperFit fit) =>
-        previousPath is not null
-        && previousPath.Length > 0
-        && fit == WallpaperFit.Fill
-        && File.Exists(previousPath);
-
-    /// <summary>
-    /// Where a picture lands under Fill (WallpaperStyle 10): scaled to cover the
-    /// target, aspect ratio kept, centred, whatever sticks out cropped away.
-    /// </summary>
-    private static Rectangle GetFillRectangle(Rectangle target, Size image)
-    {
-        if (image.Width <= 0 || image.Height <= 0)
-        {
-            return target;
-        }
-
-        double scale = Math.Max(
-            target.Width / (double)image.Width,
-            target.Height / (double)image.Height);
-        int width = (int)Math.Round(image.Width * scale);
-        int height = (int)Math.Round(image.Height * scale);
-
-        return new Rectangle(
-            target.X + ((target.Width - width) / 2),
-            target.Y + ((target.Height - height) / 2),
-            width,
-            height);
-    }
-
-    /// <summary>
     /// The window that holds the outgoing picture, the thread it lives on, and the
     /// timer that fades it out.
     ///
@@ -444,16 +367,15 @@ internal static class WallpaperTransition
     /// control tree and a lifetime model that have nothing to do with any of that.
     /// </para>
     /// <para>
-    /// Everything below runs on the fade thread except the four members the caller
-    /// uses to drive it - <see cref="ShowAsync"/>, <see cref="IsRunning"/>,
-    /// <see cref="BeginFade"/> and <see cref="Cancel"/> - which cross threads through
-    /// a task, two volatile flags and posted messages, and nothing else.
+    /// Everything below runs on the fade thread except the members the caller drives
+    /// it with - <see cref="ShowAsync"/>, <see cref="HoldAsync"/>,
+    /// <see cref="IsRunning"/>, <see cref="BeginFade"/> and <see cref="Cancel"/> -
+    /// which cross threads through tasks, one volatile flag and posted messages, and
+    /// nothing else.
     /// </para>
     /// </summary>
     private sealed class Cover : NativeWindow
     {
-        private readonly string? _previousPath;
-        private readonly WallpaperFit _fit;
         private readonly Thread _thread;
         private readonly System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
         private readonly Stopwatch _clock = new Stopwatch();
@@ -501,10 +423,8 @@ internal static class WallpaperTransition
         /// <summary>Set by the fade thread when its message loop has ended.</summary>
         private volatile bool _finished;
 
-        public Cover(string? previousPath, WallpaperFit fit)
+        public Cover()
         {
-            _previousPath = previousPath;
-            _fit = fit;
             _timer.Interval = TickMilliseconds;
             _timer.Tick += OnTick;
 
@@ -711,19 +631,8 @@ internal static class WallpaperTransition
                 _size = bounds.Size;
                 CreateSurface();
 
-                string source;
-                if (Capture(host))
+                if (!Capture(host))
                 {
-                    source = "capture";
-                }
-                else if (CanRender(_previousPath, _fit))
-                {
-                    Render(_previousPath!, bounds, GetMonitors(bounds));
-                    source = "render";
-                }
-                else
-                {
-                    Logger.Warn("fade: nothing to paint the cover with, cutting instead");
                     return false;
                 }
 
@@ -737,8 +646,7 @@ internal static class WallpaperTransition
                         // the handle goes through Int64 to be formatted at all.
                         "fade: covered host=0x" + host.ToInt64().ToString("X", CultureInfo.InvariantCulture) +
                         " size=" + bounds.Width.ToString(CultureInfo.InvariantCulture) +
-                        "x" + bounds.Height.ToString(CultureInfo.InvariantCulture) +
-                        " source=" + source);
+                        "x" + bounds.Height.ToString(CultureInfo.InvariantCulture));
                 }
 
                 return true;
@@ -815,9 +723,14 @@ internal static class WallpaperTransition
         /// Undocumented all the same, and DWM is free to hand back a blank surface for
         /// a window it composes another way, without saying so. There is no way to ask
         /// in advance, so the result is sampled instead: a surface that is one flat
-        /// colour is called a failure. A genuinely single coloured wallpaper is
-        /// misjudged by that rule, and pays for it with the fallback path and nothing
-        /// else.
+        /// colour is called a failure and the change cuts. That rule misjudges a
+        /// genuinely single coloured wallpaper, which costs it a fade nobody could
+        /// have seen anyway.
+        /// </para>
+        /// <para>
+        /// Every failure here is logged at Warn, not Debug: this is the only way the
+        /// cover is ever painted, so a machine where it does not work is a machine
+        /// with no crossfade at all, and that should not need Debug logging to find.
         /// </para>
         /// </summary>
         private bool Capture(IntPtr host)
@@ -825,7 +738,7 @@ internal static class WallpaperTransition
             IntPtr hostDc = NativeMethods.GetDC(host);
             if (hostDc == IntPtr.Zero)
             {
-                Logger.Debug("fade: the wallpaper window has no device context");
+                Logger.Warn("fade: the wallpaper window has no device context, cutting instead");
                 return false;
             }
 
@@ -842,53 +755,17 @@ internal static class WallpaperTransition
 
             if (!copied)
             {
-                Logger.Debug("fade: copying the wallpaper layer failed");
+                Logger.Warn("fade: copying the wallpaper layer failed, cutting instead");
                 return false;
             }
 
             if (!HasDetail())
             {
-                Logger.Debug("fade: the wallpaper layer came back flat");
+                Logger.Warn("fade: the wallpaper layer came back flat, cutting instead");
                 return false;
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Draws the outgoing picture into the surface from its file. The fallback for
-        /// a copy that came back blank - see <see cref="Capture"/> and CanRender.
-        /// </summary>
-        private void Render(string path, Rectangle bounds, List<Rectangle> monitors)
-        {
-            // Read the file rather than decode from it: Image.FromStream keeps reading
-            // from the stream for as long as the image lives, and this picture is the
-            // wallpaper - a locked file is the one thing it must not become.
-            byte[] bytes = File.ReadAllBytes(path);
-            using (MemoryStream stream = new MemoryStream(bytes, writable: false))
-            using (Image source = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: false))
-            using (Graphics graphics = Graphics.FromHdc(_memoryDc))
-            {
-                // The cover has to match what Windows drew a moment ago closely enough
-                // that putting it up is invisible, so this is not the place to save a
-                // few milliseconds on resampling.
-                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
-                foreach (Rectangle monitor in monitors)
-                {
-                    Rectangle target = new Rectangle(
-                        monitor.X - bounds.X,
-                        monitor.Y - bounds.Y,
-                        monitor.Width,
-                        monitor.Height);
-
-                    // SetClip rather than assigning Clip: the property takes a Region,
-                    // which would be one more GDI object to own and release per monitor.
-                    graphics.SetClip(target);
-                    graphics.DrawImage(source, GetFillRectangle(target, source.Size));
-                }
-            }
         }
 
         /// <summary>Puts the cover up, opaque, underneath the desktop icons.</summary>

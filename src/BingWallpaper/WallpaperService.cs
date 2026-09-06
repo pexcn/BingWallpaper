@@ -37,9 +37,8 @@ internal static class WallpaperService
     ///
     /// <para>
     /// <paramref name="previousPath"/> is not what the fade paints - it copies the
-    /// wallpaper layer itself and needs nothing from here. It is what the fade falls
-    /// back to when that copy comes back blank, and what tells a real change apart
-    /// from re-applying the very same picture, which must never fade.
+    /// wallpaper layer itself and needs nothing from here. It is only what tells a
+    /// real change apart from re-applying the very same picture, which must not fade.
     /// </para>
     /// </summary>
     public static Task<bool> ApplyAsync(string imagePath, WallpaperFit fit, bool fade, string? previousPath)
@@ -49,7 +48,7 @@ internal static class WallpaperService
             return ApplyCoreAsync(imagePath, fit);
         }
 
-        return WallpaperTransition.RunAsync(previousPath, fit, () => ApplyCoreAsync(imagePath, fit));
+        return WallpaperTransition.RunAsync(() => ApplyCoreAsync(imagePath, fit));
     }
 
     /// <summary>

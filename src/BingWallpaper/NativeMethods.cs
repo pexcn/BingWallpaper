@@ -239,13 +239,6 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr param);
 
-    /// <summary>
-    /// user32!EnumDisplayMonitors callback. The rectangle is the monitor's own, in
-    /// virtual screen coordinates.
-    /// </summary>
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, ref RECT rect, IntPtr param);
-
     /// <summary>user32!FindWindowW. Available since Windows 2000.</summary>
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr FindWindowW(string? className, string? windowName);
@@ -297,11 +290,6 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint colorKey, byte alpha, uint flags);
-
-    /// <summary>user32!EnumDisplayMonitors. Available since Windows 2000.</summary>
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr param);
 
     /// <summary>
     /// user32!SetThreadDpiAwarenessContext. Available since Windows 10 version 1607
