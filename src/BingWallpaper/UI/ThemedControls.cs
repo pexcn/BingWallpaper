@@ -875,24 +875,34 @@ internal sealed class ThemedSegmentedControl : Control
 }
 
 /// <summary>
-/// A button that stays down: what it carries is a mode that is on or off, not a
-/// command that runs once.
+/// A caption with a switch beside it: what it carries is a mode that is on or off,
+/// not a command that runs once.
 ///
 /// <para>
-/// Painted as one segment of <see cref="ThemedSegmentedControl"/> would be - the
-/// accent colour when on, the window background and a frame when off - because that
-/// is what it shares a row with. A <see cref="ThemedCheckBox"/> says the same thing
-/// and costs nothing to add, but a form field in a header reads as a preference
-/// rather than as the state the program is in right now, and a 15 pixel tick is a
-/// small mark for a mode that moves the desktop on its own.
+/// It used to be drawn as one segment of <see cref="ThemedSegmentedControl"/> would
+/// be, to match the strip it shares a row with. Matching it was the mistake: an off
+/// switch came out pixel for pixel an unselected tab, so the header read as three
+/// tabs with the last one pushed to the far right, and the only thing telling off
+/// from disabled was how grey the caption was. Neither state said which way the mode
+/// was set - the off fill was the header's own colour, so the control was a caption
+/// with a frame around it and no answer until it had been clicked once to find out.
+/// A capsule is a shape nothing else in that row has, and the thumb sits on the side
+/// the mode is on.
+/// </para>
+///
+/// <para>
+/// The colours are the ones <see cref="ThemedCheckBox"/> uses, so the two agree: the
+/// accent when on, <see cref="ThemePalette.GlyphBackground"/> behind a
+/// <see cref="ThemePalette.GlyphBorder"/> outline when off, that outline going accent
+/// under the mouse, and a disabled control falling back to the flat greys.
 /// </para>
 /// </summary>
-internal sealed class ThemedToggleButton : Control
+internal sealed class ThemedToggleSwitch : Control
 {
     private bool _checked;
     private bool _hovered;
 
-    public ThemedToggleButton(string text)
+    public ThemedToggleSwitch(string text)
     {
         Text = text;
         TabStop = true;
@@ -923,48 +933,137 @@ internal sealed class ThemedToggleButton : Control
         }
     }
 
-    /// <summary>The same padding around the caption a segment uses, so the two match.</summary>
+    /// <summary>The 40x20 track the Windows 10 settings app uses, with its 12 pixel thumb.</summary>
+    private static int TrackWidth => DpiScale.Round(40);
+
+    private static int TrackHeight => DpiScale.Round(20);
+
+    /// <summary>Track edge to thumb, the gap the settings app leaves around it.</summary>
+    private static int ThumbInset => DpiScale.Round(4);
+
+    /// <summary>
+    /// The thumb, taken off the track rather than scaled on its own. Scaling 12 and 20
+    /// separately lets the two round to opposite parities - 110% and 140% both do it -
+    /// and the difference between them is then odd, so halving it to an inset truncates
+    /// and drops the thumb a whole pixel towards the top of its track. Subtracting a
+    /// scaled inset keeps the difference even at every scale, and 20 less twice 4 is
+    /// the 12 this started as.
+    /// </summary>
+    private static int ThumbSize => TrackHeight - (ThumbInset * 2);
+
+    /// <summary>
+    /// Between the caption and the track. Narrower than it looks it should be: the
+    /// track ends in an arc, so its outermost column of pixels is a hairline and the
+    /// mass the eye takes for the edge starts a few pixels further in.
+    /// </summary>
+    private static int Gap => DpiScale.Round(6);
+
     public override Size GetPreferredSize(Size proposedSize)
     {
         Size text = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
-        return new Size(text.Width + DpiScale.Round(28), Font.Height + DpiScale.Round(10));
+        return new Size(
+            text.Width + Gap + TrackWidth,
+            Math.Max(TrackHeight, text.Height) + DpiScale.Round(6));
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         ThemePalette palette = ThemeManager.Palette;
         Graphics g = e.Graphics;
-        Rectangle face = new Rectangle(0, 0, Width, Height);
+        g.Clear(BackColor);
 
-        Color fill = !Enabled || (!_checked && !_hovered)
-            ? palette.WindowBackground
-            : _checked ? palette.Accent : palette.Hover;
-        using (SolidBrush brush = new SolidBrush(fill))
-        {
-            g.FillRectangle(brush, face);
-        }
-
+        // Right aligned, against the gap, rather than left aligned from the edge: the
+        // caption is measured with MeasureText while the track is placed from the right
+        // edge, so whatever GDI reports over what it actually inks - a few pixels on
+        // CJK - falls between the two, which is the one place in this control it can be
+        // seen. Right aligning moves that slack to the left edge, where the control is
+        // anchored by its right one and nothing is looking. ThemedCheckBox never had it
+        // to deal with: its glyph comes first, so the caption starts at a fixed offset
+        // from the glyph and the slack ends up past the last letter, outside everything.
+        Rectangle caption = new Rectangle(0, 0, Width - TrackWidth - Gap, Height);
         TextRenderer.DrawText(
             g,
             Text,
             Font,
-            face,
-            !Enabled ? palette.SecondaryText : _checked ? palette.GlyphMark : palette.Text,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            caption,
+            Enabled ? ForeColor : palette.SecondaryText,
+            TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
 
-        // No anti aliasing - see ThemedComboBox for what it does to a one pixel frame.
-        using Pen border = new Pen(palette.Border);
-        g.DrawRectangle(border, face.X, face.Y, face.Width - 1, face.Height - 1);
+        // The one shape in this file that wants anti aliasing: left aliased, the arcs
+        // at the two ends come out visibly stepped. The straight runs along the top and
+        // bottom are exactly the one pixel frame ThemedComboBox warns about - a capsule
+        // this wide is mostly straight edge - and they survive the smoothing because
+        // the default PixelOffsetMode puts pixel centres on integer coordinates, where
+        // a one pixel pen on an integer edge still fills one row instead of two.
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        // One short of the full size, as the glyphs above are: a pen strokes the far
+        // edge of the rectangle it is handed, which would otherwise fall outside it.
+        Rectangle track = new Rectangle(
+            Width - TrackWidth,
+            (Height - TrackHeight) / 2,
+            TrackWidth - 1,
+            TrackHeight - 1);
+        // The inset is the same on all four sides by construction - see ThumbSize -
+        // so the thumb is concentric with the arc it sits in rather than centred by a
+        // division that can land half a pixel out.
+        Rectangle thumb = new Rectangle(
+            _checked ? track.Right + 1 - ThumbInset - ThumbSize : track.X + ThumbInset,
+            track.Y + ThumbInset,
+            ThumbSize - 1,
+            ThumbSize - 1);
+
+        using GraphicsPath capsule = Capsule(track);
+        if (_checked)
+        {
+            using (SolidBrush fill = new(Enabled ? palette.Accent : palette.SecondaryText))
+            {
+                g.FillPath(fill, capsule);
+            }
+
+            using SolidBrush mark = new(palette.GlyphMark);
+            g.FillEllipse(mark, thumb);
+        }
+        else
+        {
+            using (SolidBrush fill = new(palette.GlyphBackground))
+            {
+                g.FillPath(fill, capsule);
+            }
+
+            // The thumb takes the outline colour rather than a fill of its own: off is
+            // the state that has to stay legible against a window background it is
+            // nearly the colour of, and one colour on both parts is what carries it.
+            Color outline = !Enabled ? palette.Border : _hovered ? palette.Accent : palette.GlyphBorder;
+            using (Pen pen = new Pen(outline, Math.Max(1, DpiScale.Round(1))))
+            {
+                g.DrawPath(pen, capsule);
+            }
+
+            using SolidBrush mark = new(outline);
+            g.FillEllipse(mark, thumb);
+        }
 
         // ShowFocusCues for the same reason as the segmented strip: a ring drawn
-        // before anyone touched the keyboard reads as an error.
+        // before anyone touched the keyboard reads as an error. Around the whole
+        // control, caption included, now that there is no filled face to sit inside.
         if (Focused && ShowFocusCues)
         {
-            int inset = DpiScale.Round(3);
-            Rectangle focus = Rectangle.Inflate(face, -inset, -inset);
-            using Pen pen = new Pen(_checked ? palette.GlyphMark : palette.Text) { DashStyle = DashStyle.Dot };
-            g.DrawRectangle(pen, focus.X, focus.Y, focus.Width - 1, focus.Height - 1);
+            g.SmoothingMode = SmoothingMode.None;
+            using Pen pen = new Pen(Enabled ? ForeColor : palette.SecondaryText) { DashStyle = DashStyle.Dot };
+            g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
         }
+    }
+
+    /// <summary>The track: a rectangle with both ends closed by a half circle.</summary>
+    private static GraphicsPath Capsule(Rectangle bounds)
+    {
+        int diameter = bounds.Height;
+        GraphicsPath path = new GraphicsPath();
+        path.AddArc(bounds.X, bounds.Y, diameter, diameter, 90, 180);
+        path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 180);
+        path.CloseFigure();
+        return path;
     }
 
     protected override void OnMouseEnter(EventArgs e)
@@ -992,7 +1091,7 @@ internal sealed class ThemedToggleButton : Control
         base.OnMouseDown(e);
     }
 
-    /// <summary>Space toggles, as it does on any button that carries a state.</summary>
+    /// <summary>Space toggles, as it does on any control that carries a state.</summary>
     protected override bool IsInputKey(Keys keyData) => (keyData & Keys.KeyCode) switch
     {
         Keys.Space => true,

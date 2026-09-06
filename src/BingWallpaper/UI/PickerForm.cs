@@ -61,11 +61,11 @@ internal sealed class PickerForm : Form
 
     private readonly TrayContext _context;
 
-    /// <summary>Holds the tab strip and, at its right edge, the rotation button.</summary>
+    /// <summary>Holds the tab strip and, at its right edge, the rotation switch.</summary>
     private readonly Panel _header = new Panel();
 
     private readonly ThemedSegmentedControl _tabs = new ThemedSegmentedControl("最近", "收藏");
-    private readonly ThemedToggleButton _shuffleButton = new ThemedToggleButton("随机轮播");
+    private readonly ThemedToggleSwitch _shuffleSwitch = new ThemedToggleSwitch("随机轮播");
     private readonly ThemedSeparator _tabSeparator = new ThemedSeparator();
     private readonly TileGrid _grid = new TileGrid();
     private readonly ThemedSeparator _statusSeparator = new ThemedSeparator();
@@ -96,7 +96,7 @@ internal sealed class PickerForm : Form
     /// <summary>Set while <see cref="ApplyFavoriteAsync"/> owns <see cref="_busy"/>.</summary>
     private bool _applyingFavorite;
 
-    /// <summary>Set while <see cref="SyncShuffle"/> writes the button, see there.</summary>
+    /// <summary>Set while <see cref="SyncShuffle"/> writes the switch, see there.</summary>
     private bool _syncingShuffle;
 
     /// <summary>
@@ -135,14 +135,14 @@ internal sealed class PickerForm : Form
         // has never been a setting either - and what it plays is exactly what the tab
         // below is showing. Hidden on the recent tab, which it has nothing to do with.
         // The tray menu keeps its own row: that one is reachable without a window.
-        _shuffleButton.Visible = false;
-        _shuffleButton.CheckedChanged += OnShuffleButtonChanged;
+        _shuffleSwitch.Visible = false;
+        _shuffleSwitch.CheckedChanged += OnShuffleSwitchChanged;
 
         // The strip first, so Tab reaches the two of them left to right: neither
         // carries a TabIndex of its own, and WinForms falls back to the child order.
         _header.Dock = DockStyle.Top;
         _header.Controls.Add(_tabs);
-        _header.Controls.Add(_shuffleButton);
+        _header.Controls.Add(_shuffleSwitch);
 
         _tabSeparator.Dock = DockStyle.Top;
 
@@ -188,7 +188,7 @@ internal sealed class PickerForm : Form
         Size strip = _tabs.GetPreferredSize(Size.Empty);
         _tabs.Width = strip.Width;
         _header.Height = strip.Height;
-        _shuffleButton.Size = _shuffleButton.GetPreferredSize(Size.Empty);
+        _shuffleSwitch.Size = _shuffleSwitch.GetPreferredSize(Size.Empty);
 
         FitToGrid();
 
@@ -233,15 +233,26 @@ internal sealed class PickerForm : Form
     }
 
     /// <summary>
-    /// Puts the rotation button against the right edge of the header, at the same
+    /// Puts the rotation switch against the right edge of the header, at the same
     /// margin the tab strip keeps on the left and centred on the same line.
+    ///
+    /// <para>
+    /// The scroll bar lane <see cref="FitToGrid"/> reserves was taken off this margin
+    /// for a while, to line the switch up with the right edge of the tiles. It went
+    /// back: that alignment holds only while a bar is showing - the grid centres itself
+    /// and the tiles move when one is not - and it is read across the separator, which
+    /// the eye does not do. What the eye compares is the two things inside the header,
+    /// and that came out as 8 pixels on the left against 25 on the right. Overhanging
+    /// the bar lane was worth avoiding while this was a bordered button crossing the
+    /// bar's line; a capsule ends in an arc and does not.
+    /// </para>
     /// </summary>
     private void LayoutHeader()
     {
         int margin = DpiScale.Round(8);
-        _shuffleButton.Location = new Point(
-            _header.ClientSize.Width - margin - _shuffleButton.Width,
-            (_header.ClientSize.Height - _shuffleButton.Height) / 2);
+        _shuffleSwitch.Location = new Point(
+            _header.ClientSize.Width - margin - _shuffleSwitch.Width,
+            (_header.ClientSize.Height - _shuffleSwitch.Height) / 2);
     }
 
     protected override void Dispose(bool disposing)
@@ -377,20 +388,20 @@ internal sealed class PickerForm : Form
             _grid.SetSource(_recent);
         }
 
-        _shuffleButton.Visible = index == FavoritesTab;
+        _shuffleSwitch.Visible = index == FavoritesTab;
         SyncShuffle();
         UpdateStatusForTab();
         _grid.Focus();
     }
 
     /// <summary>
-    /// Brings the rotation button into line with the program, and is the only thing
+    /// Brings the rotation switch into line with the program, and is the only thing
     /// that writes it.
     ///
     /// <para>
     /// Every part of its state has a second writer: the tray menu row switches the
     /// rotation, locking a wallpaper - which a click on any tile here does - turns it
-    /// off, and a refresh greys the row out. So the button is told what it is, the way
+    /// off, and a refresh greys the row out. So the switch is told what it is, the way
     /// the tray menu row is, rather than left remembering what it was last clicked to.
     /// </para>
     /// </summary>
@@ -405,7 +416,7 @@ internal sealed class PickerForm : Form
         // nothing at all, which from the outside cannot be told apart from the click
         // not having registered. Only while it is off, though - one that is somehow
         // already running has to stay switchable or there would be no way to stop it.
-        _shuffleButton.Enabled = !_context.IsBusy
+        _shuffleSwitch.Enabled = !_context.IsBusy
             && (_context.Config.Shuffle || _favoriteItems.Count > 0);
 
         // The guard the settings window used to need for the same reason: this is the
@@ -413,7 +424,7 @@ internal sealed class PickerForm : Form
         _syncingShuffle = true;
         try
         {
-            _shuffleButton.Checked = _context.Config.Shuffle;
+            _shuffleSwitch.Checked = _context.Config.Shuffle;
         }
         finally
         {
@@ -421,18 +432,18 @@ internal sealed class PickerForm : Form
         }
     }
 
-    private void OnShuffleButtonChanged(object? sender, EventArgs e)
+    private void OnShuffleSwitchChanged(object? sender, EventArgs e)
     {
         if (_syncingShuffle)
         {
             return;
         }
 
-        _context.SetShuffle(_shuffleButton.Checked);
+        _context.SetShuffle(_shuffleSwitch.Checked);
 
         // A save that failed leaves the configuration as it was and says so in a
-        // dialog of its own; the button has already moved, so it is put back here.
-        // In the ordinary case this writes the value the button is already showing
+        // dialog of its own; the switch has already moved, so it is put back here.
+        // In the ordinary case this writes the value the switch is already showing
         // and nothing happens.
         SyncShuffle();
     }
