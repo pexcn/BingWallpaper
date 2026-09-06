@@ -875,6 +875,165 @@ internal sealed class ThemedSegmentedControl : Control
 }
 
 /// <summary>
+/// A button that stays down: what it carries is a mode that is on or off, not a
+/// command that runs once.
+///
+/// <para>
+/// Painted as one segment of <see cref="ThemedSegmentedControl"/> would be - the
+/// accent colour when on, the window background and a frame when off - because that
+/// is what it shares a row with. A <see cref="ThemedCheckBox"/> says the same thing
+/// and costs nothing to add, but a form field in a header reads as a preference
+/// rather than as the state the program is in right now, and a 15 pixel tick is a
+/// small mark for a mode that moves the desktop on its own.
+/// </para>
+/// </summary>
+internal sealed class ThemedToggleButton : Control
+{
+    private bool _checked;
+    private bool _hovered;
+
+    public ThemedToggleButton(string text)
+    {
+        Text = text;
+        TabStop = true;
+        SetStyle(
+            ControlStyles.UserPaint
+            | ControlStyles.AllPaintingInWmPaint
+            | ControlStyles.OptimizedDoubleBuffer
+            | ControlStyles.ResizeRedraw
+            | ControlStyles.Selectable,
+            true);
+    }
+
+    public event EventHandler? CheckedChanged;
+
+    public bool Checked
+    {
+        get => _checked;
+        set
+        {
+            if (_checked == value)
+            {
+                return;
+            }
+
+            _checked = value;
+            Invalidate();
+            CheckedChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>The same padding around the caption a segment uses, so the two match.</summary>
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        Size text = TextRenderer.MeasureText(Text, Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+        return new Size(text.Width + DpiScale.Round(28), Font.Height + DpiScale.Round(10));
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        ThemePalette palette = ThemeManager.Palette;
+        Graphics g = e.Graphics;
+        Rectangle face = new Rectangle(0, 0, Width, Height);
+
+        Color fill = !Enabled || (!_checked && !_hovered)
+            ? palette.WindowBackground
+            : _checked ? palette.Accent : palette.Hover;
+        using (SolidBrush brush = new SolidBrush(fill))
+        {
+            g.FillRectangle(brush, face);
+        }
+
+        TextRenderer.DrawText(
+            g,
+            Text,
+            Font,
+            face,
+            !Enabled ? palette.SecondaryText : _checked ? palette.GlyphMark : palette.Text,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+
+        // No anti aliasing - see ThemedComboBox for what it does to a one pixel frame.
+        using Pen border = new Pen(palette.Border);
+        g.DrawRectangle(border, face.X, face.Y, face.Width - 1, face.Height - 1);
+
+        // ShowFocusCues for the same reason as the segmented strip: a ring drawn
+        // before anyone touched the keyboard reads as an error.
+        if (Focused && ShowFocusCues)
+        {
+            int inset = DpiScale.Round(3);
+            Rectangle focus = Rectangle.Inflate(face, -inset, -inset);
+            using Pen pen = new Pen(_checked ? palette.GlyphMark : palette.Text) { DashStyle = DashStyle.Dot };
+            g.DrawRectangle(pen, focus.X, focus.Y, focus.Width - 1, focus.Height - 1);
+        }
+    }
+
+    protected override void OnMouseEnter(EventArgs e)
+    {
+        _hovered = true;
+        Invalidate();
+        base.OnMouseEnter(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        _hovered = false;
+        Invalidate();
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            Focus();
+            Checked = !_checked;
+        }
+
+        base.OnMouseDown(e);
+    }
+
+    /// <summary>Space toggles, as it does on any button that carries a state.</summary>
+    protected override bool IsInputKey(Keys keyData) => (keyData & Keys.KeyCode) switch
+    {
+        Keys.Space => true,
+        _ => base.IsInputKey(keyData),
+    };
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Space)
+        {
+            e.Handled = true;
+            Checked = !_checked;
+            return;
+        }
+
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnGotFocus(e);
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnLostFocus(e);
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        // A control that is disabled under the cursor never gets its MouseLeave, so
+        // the hover would still be there when it comes back.
+        _hovered = _hovered && Enabled;
+        Invalidate();
+        base.OnEnabledChanged(e);
+    }
+}
+
+/// <summary>
 /// One line of status text along the bottom of a window.
 ///
 /// A plain Label would do everything here except arrive in one piece: it erases its

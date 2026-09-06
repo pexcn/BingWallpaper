@@ -60,7 +60,12 @@ internal sealed class PickerForm : Form
     private const int TransientStatusMilliseconds = 5000;
 
     private readonly TrayContext _context;
+
+    /// <summary>Holds the tab strip and, at its right edge, the rotation button.</summary>
+    private readonly Panel _header = new Panel();
+
     private readonly ThemedSegmentedControl _tabs = new ThemedSegmentedControl("最近", "收藏");
+    private readonly ThemedToggleButton _shuffleButton = new ThemedToggleButton("随机轮播");
     private readonly ThemedSeparator _tabSeparator = new ThemedSeparator();
     private readonly TileGrid _grid = new TileGrid();
     private readonly ThemedSeparator _statusSeparator = new ThemedSeparator();
@@ -91,6 +96,9 @@ internal sealed class PickerForm : Form
     /// <summary>Set while <see cref="ApplyFavoriteAsync"/> owns <see cref="_busy"/>.</summary>
     private bool _applyingFavorite;
 
+    /// <summary>Set while <see cref="SyncShuffle"/> writes the button, see there.</summary>
+    private bool _syncingShuffle;
+
     /// <summary>
     /// The favourite clicked while another one was still being applied, or null. One
     /// slot rather than a queue: see <see cref="ApplyFavoriteAsync"/>.
@@ -119,8 +127,22 @@ internal sealed class PickerForm : Form
         MaximizeBox = false;
         KeyPreview = true;
 
-        _tabs.Dock = DockStyle.Top;
+        _tabs.Dock = DockStyle.Left;
         _tabs.SelectedIndexChanged += (_, _) => ShowTab(_tabs.SelectedIndex);
+
+        // The rotation is switched here rather than in the settings window, where it
+        // used to be: it is the mode the program is in right now - like the lock, which
+        // has never been a setting either - and what it plays is exactly what the tab
+        // below is showing. Hidden on the recent tab, which it has nothing to do with.
+        // The tray menu keeps its own row: that one is reachable without a window.
+        _shuffleButton.Visible = false;
+        _shuffleButton.CheckedChanged += OnShuffleButtonChanged;
+
+        // The strip first, so Tab reaches the two of them left to right: neither
+        // carries a TabIndex of its own, and WinForms falls back to the child order.
+        _header.Dock = DockStyle.Top;
+        _header.Controls.Add(_tabs);
+        _header.Controls.Add(_shuffleButton);
 
         _tabSeparator.Dock = DockStyle.Top;
 
@@ -138,10 +160,10 @@ internal sealed class PickerForm : Form
         _statusTimer.Tick += (_, _) => RestoreRestingStatus();
 
         // Docking is resolved from the last control backwards, so the status bar takes
-        // the bottom edge, the tab strip the top one and the grid fills the rest.
+        // the bottom edge, the header the top one and the grid fills the rest.
         Controls.Add(_grid);
         Controls.Add(_tabSeparator);
-        Controls.Add(_tabs);
+        Controls.Add(_header);
         Controls.Add(_statusSeparator);
         Controls.Add(_status);
 
@@ -158,13 +180,22 @@ internal sealed class PickerForm : Form
     {
         base.OnLoad(e);
 
-        // Measured here rather than in the constructor: the strip measures itself
-        // through DpiScale, and a size assigned before AutoScaleMode.Dpi has run would
-        // be scaled a second time - the same reason SettingsForm sizes its drop downs
-        // from OnLoad.
-        _tabs.Height = _tabs.GetPreferredSize(Size.Empty).Height;
+        // Measured here rather than in the constructor: both controls measure
+        // themselves through DpiScale, and a size assigned before AutoScaleMode.Dpi has
+        // run would be scaled a second time - the same reason SettingsForm sizes its
+        // drop downs from OnLoad. The strip carries its own margins, so the header is
+        // exactly as tall as the strip wants to be and as wide as the window.
+        Size strip = _tabs.GetPreferredSize(Size.Empty);
+        _tabs.Width = strip.Width;
+        _header.Height = strip.Height;
+        _shuffleButton.Size = _shuffleButton.GetPreferredSize(Size.Empty);
 
         FitToGrid();
+
+        // After FitToGrid, which is what gives the header its final width. Placed by
+        // hand rather than anchored: this window is a fixed dialog, so the one layout
+        // pass is all there will ever be.
+        LayoutHeader();
 
         // FitToGrid runs after the window has already been placed: StartPosition is
         // resolved while the handle is created, against the size the form had then,
@@ -196,9 +227,21 @@ internal sealed class PickerForm : Form
         int width = (TileGrid.CellWidth * Columns)
             + (TileGrid.EdgePadding * 2)
             + SystemInformation.VerticalScrollBarWidth;
-        int chrome = _tabs.Height + _tabSeparator.Height + _statusSeparator.Height + _status.Height;
+        int chrome = _header.Height + _tabSeparator.Height + _statusSeparator.Height + _status.Height;
 
         ClientSize = new Size(width, (_grid.CellHeight * Rows) + (TileGrid.EdgePadding * 2) + chrome);
+    }
+
+    /// <summary>
+    /// Puts the rotation button against the right edge of the header, at the same
+    /// margin the tab strip keeps on the left and centred on the same line.
+    /// </summary>
+    private void LayoutHeader()
+    {
+        int margin = DpiScale.Round(8);
+        _shuffleButton.Location = new Point(
+            _header.ClientSize.Width - margin - _shuffleButton.Width,
+            (_header.ClientSize.Height - _shuffleButton.Height) / 2);
     }
 
     protected override void Dispose(bool disposing)
@@ -334,8 +377,64 @@ internal sealed class PickerForm : Form
             _grid.SetSource(_recent);
         }
 
+        _shuffleButton.Visible = index == FavoritesTab;
+        SyncShuffle();
         UpdateStatusForTab();
         _grid.Focus();
+    }
+
+    /// <summary>
+    /// Brings the rotation button into line with the program, and is the only thing
+    /// that writes it.
+    ///
+    /// <para>
+    /// Every part of its state has a second writer: the tray menu row switches the
+    /// rotation, locking a wallpaper - which a click on any tile here does - turns it
+    /// off, and a refresh greys the row out. So the button is told what it is, the way
+    /// the tray menu row is, rather than left remembering what it was last clicked to.
+    /// </para>
+    /// </summary>
+    public void SyncShuffle()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        // Greyed out on an empty folder: a rotation with nothing to rotate does
+        // nothing at all, which from the outside cannot be told apart from the click
+        // not having registered. Only while it is off, though - one that is somehow
+        // already running has to stay switchable or there would be no way to stop it.
+        _shuffleButton.Enabled = !_context.IsBusy
+            && (_context.Config.Shuffle || _favoriteItems.Count > 0);
+
+        // The guard the settings window used to need for the same reason: this is the
+        // configuration being reflected, not a click, so nothing is saved.
+        _syncingShuffle = true;
+        try
+        {
+            _shuffleButton.Checked = _context.Config.Shuffle;
+        }
+        finally
+        {
+            _syncingShuffle = false;
+        }
+    }
+
+    private void OnShuffleButtonChanged(object? sender, EventArgs e)
+    {
+        if (_syncingShuffle)
+        {
+            return;
+        }
+
+        _context.SetShuffle(_shuffleButton.Checked);
+
+        // A save that failed leaves the configuration as it was and says so in a
+        // dialog of its own; the button has already moved, so it is put back here.
+        // In the ordinary case this writes the value the button is already showing
+        // and nothing happens.
+        SyncShuffle();
     }
 
     /// <summary>
@@ -388,6 +487,9 @@ internal sealed class PickerForm : Form
             _grid.Reload(keepPosition);
         }
 
+        // The folder just gained or lost an entry, and whether it is empty is what
+        // decides if the rotation can be switched on at all.
+        SyncShuffle();
         UpdateStatusForTab();
         _grid.Invalidate();
     }

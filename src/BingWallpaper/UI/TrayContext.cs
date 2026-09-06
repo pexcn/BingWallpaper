@@ -281,6 +281,13 @@ internal sealed class TrayContext : ApplicationContext
     /// <summary>Whether the wallpaper is held against the refresh timer.</summary>
     public bool IsPinned => _config.IsPinned;
 
+    /// <summary>
+    /// Whether a refresh pass owns the program. What greys the tray menu out, and with
+    /// it the picker's rotation button - the two switch the same thing and must not
+    /// disagree about whether it can be switched.
+    /// </summary>
+    public bool IsBusy => _busy;
+
     public CancellationToken ShutdownToken => _shutdown.Token;
 
     /// <summary>
@@ -1020,11 +1027,12 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// The only writer of <see cref="AppConfig.Shuffle"/>. Like <see cref="SetPinned"/>
-    /// the value in memory changes only once it is on disk, so a failed save leaves
-    /// the program and the configuration file saying the same thing.
+    /// The only writer of <see cref="AppConfig.Shuffle"/> - the tray menu row and the
+    /// picker's header button both come here. Like <see cref="SetPinned"/> the value in
+    /// memory changes only once it is on disk, so a failed save leaves the program and
+    /// the configuration file saying the same thing.
     /// </summary>
-    private void SetShuffle(bool enabled)
+    public void SetShuffle(bool enabled)
     {
         if (_config.Shuffle == enabled)
         {
@@ -1593,11 +1601,10 @@ internal sealed class TrayContext : ApplicationContext
         // runs - stepping through the list from the tray menu moves both badges.
         _pickerForm?.RefreshCurrentMarker();
 
-        // The rotation is the one setting with two writers: the menu row here - and
-        // the lock, which turns it off - and the check box in the settings window. A
-        // window left open would otherwise go on showing the state it was opened with,
-        // and its own check box is what the next click there compares against.
-        _settingsForm?.SyncShuffle();
+        // The rotation has two switches: the menu row here - and the lock, which turns
+        // it off - and the button above the picker's favourites. A window left open
+        // would otherwise go on showing the state it was opened with.
+        _pickerForm?.SyncShuffle();
     }
 
     private void ShowSettings()
@@ -1679,10 +1686,6 @@ internal sealed class TrayContext : ApplicationContext
                 _timer.Interval = GetIntervalMilliseconds();
                 _timer.Start();
                 Logger.Debug("refresh: timer interval=" + _config.RefreshIntervalHours + "h");
-                break;
-
-            case SettingKind.Shuffle:
-                OnShuffleModeChanged();
                 break;
 
             case SettingKind.ShuffleInterval:
