@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -39,16 +40,22 @@ namespace BingWallpaper;
 /// picture from its file is kept only for the case where the copy comes back blank.
 /// </para>
 /// <para>
-/// The alpha is the only thing that moves: the frame is uploaded once and DWM
-/// composes it, so a tick costs one byte rather than a full screen blend.
+/// The cover lives on a thread of its own, which exists for as long as one fade
+/// does. An animation has nothing to do with what the rest of the program is busy
+/// with, and putting it on the main thread made it hostage to exactly that: a fade
+/// is driven by WM_TIMER, the lowest priority message there is, so a queue holding
+/// input or paints starves it - and a burst of clicks is a queue full of input.
+/// Fades were lost entirely that way, without a trace, because a starved fade
+/// still ends by its clock and simply never draws a frame. On its own thread there
+/// is nothing else in the queue. It also confines the input queue attachment that
+/// comes with parenting a window across a process boundary to a thread that lives
+/// for half a second, instead of the one that runs the program.
 /// </para>
 /// <para>
-/// Two costs are worth knowing about. A window parented across a process boundary
-/// attaches the two input queues for as long as it lives, so a wedged Explorer
-/// could wedge this program - the cover exists for about half a second, which is
-/// what makes that acceptable. And the frame is a screen sized bitmap, tens of
-/// megabytes on a 4K desktop, which is why it is released the moment the fade ends
-/// rather than kept for the next one.
+/// A change that arrives while a fade is running is handed to that fade rather than
+/// starting a new one: see <see cref="RunAsync"/>. The alpha is the only thing that
+/// moves during it - the frame is uploaded once and DWM composes it, so a tick
+/// costs one byte rather than a full screen blend.
 /// </para>
 /// <para>
 /// None of this is documented by Microsoft, so every step is allowed to fail: no
@@ -81,8 +88,12 @@ internal static class WallpaperTransition
     /// <summary>Upper bound of the hold, see <see cref="MinHoldMilliseconds"/>.</summary>
     private const int MaxHoldMilliseconds = 500;
 
-    /// <summary>How long the fade itself takes.</summary>
-    private const int FadeMilliseconds = 380;
+    /// <summary>
+    /// How long the fade itself takes. Windows fades a slideshow wallpaper in about a
+    /// second; this is a little quicker than that, which reads as deliberate rather
+    /// than as a machine that is thinking about it.
+    /// </summary>
+    private const int FadeMilliseconds = 600;
 
     /// <summary>
     /// Roughly 60 steps a second. The elapsed time drives the alpha, not the tick
@@ -90,6 +101,35 @@ internal static class WallpaperTransition
     /// </summary>
     private const int TickMilliseconds = 15;
 
+    /// <summary>
+    /// How long to wait for the cover to appear before giving up and cutting.
+    ///
+    /// <para>
+    /// Generous, because it is never reached in the normal case - building the cover
+    /// is a blit and a window - and because reaching it means the wallpaper does not
+    /// change until it does. The one call in there that can wait on Explorer is the
+    /// Progman message, and that one carries a one second timeout of its own.
+    /// </para>
+    /// </summary>
+    private const int ShowTimeoutMilliseconds = 2000;
+
+    /// <summary>How long shutdown waits for the fade thread to finish and let go.</summary>
+    private const int JoinMilliseconds = 1000;
+
+    /// <summary>
+    /// Posted to the cover to start its fade, or to restart the hold when a second
+    /// change arrives while it is still opaque. wParam carries the hold.
+    /// </summary>
+    private const int WM_FADE_BEGIN = NativeMethods.WM_APP + 1;
+
+    /// <summary>Posted to the cover to take it down now and end its thread.</summary>
+    private const int WM_FADE_CANCEL = NativeMethods.WM_APP + 2;
+
+    /// <summary>
+    /// The fade in flight, if any. Only ever read and written on the thread that
+    /// calls <see cref="RunAsync"/>; the fade thread reaches back through the two
+    /// volatile flags on <see cref="Cover"/> and nothing else.
+    /// </summary>
     private static Cover? _active;
 
     /// <summary>
@@ -103,6 +143,15 @@ internal static class WallpaperTransition
     /// transcode off the UI thread without a frame of the new wallpaper showing.
     /// </para>
     /// <para>
+    /// A change arriving while a fade is running does not start a second one. The
+    /// cover already up shows what the desktop looked like before any of this began,
+    /// and what it uncovers is whatever Explorer has painted by the time it is gone -
+    /// so handing the change to it gives ten clicks in a row one smooth fade from the
+    /// first picture to the last, instead of ten fades that each get killed by the
+    /// next. It is also what the user asked for and cheaper than either alternative:
+    /// the pictures in between are never drawn, only applied.
+    /// </para>
+    /// <para>
     /// <paramref name="previousPath"/> and <paramref name="fit"/> are only the
     /// fallback: they describe the outgoing picture well enough to draw it again if
     /// the wallpaper layer cannot be copied.
@@ -110,169 +159,96 @@ internal static class WallpaperTransition
     /// </summary>
     public static async Task<bool> RunAsync(string? previousPath, WallpaperFit fit, Func<Task<bool>> apply)
     {
-        Cancel();
+        Cover? running = GetRunning();
+        if (running is not null)
+        {
+            Logger.Debug("fade: relayed to the cover already up");
+            (bool Applied, long Milliseconds) relay = await ApplyTimedAsync(apply).ConfigureAwait(true);
+            if (relay.Applied)
+            {
+                running.BeginFade(GetHold(relay.Milliseconds));
+            }
 
-        Cover? cover = TryCover(previousPath, fit);
-        if (cover is null)
+            return relay.Applied;
+        }
+
+        Cover cover = new Cover(previousPath, fit);
+        if (!await cover.ShowAsync().ConfigureAwait(true))
         {
             return await apply().ConfigureAwait(true);
         }
 
         _active = cover;
 
-        bool applied;
-        long spent;
+        (bool Applied, long Milliseconds) result;
         try
         {
-            Stopwatch clock = Stopwatch.StartNew();
-            applied = await apply().ConfigureAwait(true);
-            spent = clock.ElapsedMilliseconds;
+            result = await ApplyTimedAsync(apply).ConfigureAwait(true);
         }
         catch
         {
-            cover.Dispose();
+            _active = null;
+            cover.Cancel();
             throw;
         }
 
-        if (!applied)
+        if (!result.Applied)
         {
             // The desktop still shows what the cover is painted with. Leaving it up to
             // fade would be a fade to the very same picture, which reads as a flicker.
-            cover.Dispose();
+            // Forgotten here and not just cancelled: taking it down is a posted
+            // message, so it stays alive for a moment longer and the next change must
+            // not be handed to a cover that is on its way out.
+            _active = null;
+            cover.Cancel();
             return false;
         }
 
-        cover.Start(Clamp(spent, MinHoldMilliseconds, MaxHoldMilliseconds));
+        cover.BeginFade(GetHold(result.Milliseconds));
         return true;
     }
 
     /// <summary>
-    /// Ends a fade that is still running. The new wallpaper is already on the desktop
+    /// Takes down a fade that is still running and waits for its thread to let go of
+    /// Explorer's window. For shutdown: the new wallpaper is already on the desktop
     /// underneath, so this leaves the right picture on screen, just without the fade.
     /// </summary>
-    public static void Cancel() => _active?.Dispose();
-
-    private static int Clamp(long value, int min, int max) =>
-        value < min ? min : (value > max ? max : (int)value);
-
-    /// <summary>
-    /// Builds and shows the cover, or returns null when this machine's desktop is not
-    /// the shape this needs. Every failure here is a reason to cut, never to fail.
-    /// </summary>
-    private static Cover? TryCover(string? previousPath, WallpaperFit fit)
+    public static void Cancel()
     {
-        if (!Application.MessageLoop)
-        {
-            // The fade owns a window and a WinForms timer, both of which belong to the
-            // thread that pumps messages. Every caller is on it; this guards a future
-            // one that is not.
-            Logger.Debug("fade: skipped, the calling thread has no message loop");
-            return null;
-        }
-
-        IntPtr previousContext = IntPtr.Zero;
-        Cover? cover = null;
-        try
-        {
-            // The process is system DPI aware (see app.manifest), which would report
-            // the monitors and size this window in the primary monitor's scale - the
-            // wrong pixel grid on a second monitor scaled differently. The wallpaper
-            // layer is physical pixels, so this one window is measured and created as
-            // per-monitor aware; nothing else in the process changes.
-            previousContext = NativeMethods.SetThreadDpiAwarenessContext(
-                NativeMethods.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-
-            IntPtr host = FindWallpaperHost();
-            if (host == IntPtr.Zero)
-            {
-                Logger.Warn("fade: no desktop wallpaper window, cutting instead");
-                return null;
-            }
-
-            if (!NativeMethods.GetWindowRect(host, out NativeMethods.RECT hostRect))
-            {
-                Logger.Warn("fade: the wallpaper window has no rectangle, cutting instead");
-                return null;
-            }
-
-            // The desktop window has no frame, so its client origin is its window
-            // origin and a child at 0,0 covers exactly the virtual screen it spans.
-            Rectangle bounds = Rectangle.FromLTRB(hostRect.Left, hostRect.Top, hostRect.Right, hostRect.Bottom);
-            if (bounds.Width <= 0 || bounds.Height <= 0)
-            {
-                Logger.Warn("fade: the wallpaper window is empty, cutting instead");
-                return null;
-            }
-
-            cover = new Cover(bounds.Size);
-            cover.CreateSurface();
-
-            string source;
-            if (cover.Capture(host))
-            {
-                source = "capture";
-            }
-            else if (CanRender(previousPath, fit))
-            {
-                cover.Render(previousPath!, bounds, GetMonitors(bounds));
-                source = "render";
-            }
-            else
-            {
-                Logger.Warn("fade: nothing to paint the cover with, cutting instead");
-                cover.Dispose();
-                return null;
-            }
-
-            cover.Show(host);
-
-            if (Logger.IsEnabled(LogLevel.Debug))
-            {
-                Logger.Debug(
-                    // IntPtr does not implement IFormattable on .NET Framework, so the
-                    // handle goes through Int64 to be formatted at all.
-                    "fade: covered host=0x" + host.ToInt64().ToString("X", CultureInfo.InvariantCulture) +
-                    " size=" + bounds.Width.ToString(CultureInfo.InvariantCulture) +
-                    "x" + bounds.Height.ToString(CultureInfo.InvariantCulture) +
-                    " source=" + source);
-            }
-
-            return cover;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn("fade: preparing the crossfade failed, cutting instead error=" + ex.Message);
-            cover?.Dispose();
-            return null;
-        }
-        finally
-        {
-            if (previousContext != IntPtr.Zero)
-            {
-                // No try needed: a non-zero value means the first call resolved and
-                // succeeded, so this one cannot fail to find the entry point either.
-                NativeMethods.SetThreadDpiAwarenessContext(previousContext);
-            }
-        }
+        Cover? cover = _active;
+        _active = null;
+        cover?.CancelAndJoin();
     }
 
-    /// <summary>
-    /// Whether the outgoing picture can be drawn from its file, which is what happens
-    /// when the wallpaper layer could not be copied.
-    ///
-    /// <para>
-    /// Only Fill, and only because this path has to reproduce the layout Explorer drew
-    /// closely enough that putting the cover up is invisible - the very problem the
-    /// copy does not have. Fill is the default and its rule is a single line; every
-    /// other fit falls through to the cut here, which is what the whole fade did
-    /// before the copy existed.
-    /// </para>
-    /// </summary>
-    private static bool CanRender(string? previousPath, WallpaperFit fit) =>
-        previousPath is not null
-        && previousPath.Length > 0
-        && fit == WallpaperFit.Fill
-        && File.Exists(previousPath);
+    /// <summary>The fade in flight, or null once the last one has finished.</summary>
+    private static Cover? GetRunning()
+    {
+        if (_active is null)
+        {
+            return null;
+        }
+
+        if (_active.IsRunning)
+        {
+            return _active;
+        }
+
+        _active = null;
+        return null;
+    }
+
+    /// <summary>Runs the apply and reports how long it took, which sets the hold.</summary>
+    private static async Task<(bool Applied, long Milliseconds)> ApplyTimedAsync(Func<Task<bool>> apply)
+    {
+        Stopwatch clock = Stopwatch.StartNew();
+        bool applied = await apply().ConfigureAwait(true);
+        return (applied, clock.ElapsedMilliseconds);
+    }
+
+    private static int GetHold(long spent) =>
+        spent < MinHoldMilliseconds
+            ? MinHoldMilliseconds
+            : (spent > MaxHoldMilliseconds ? MaxHoldMilliseconds : (int)spent);
 
     /// <summary>
     /// Finds the window the wallpaper is painted in, which is the one to parent the
@@ -382,6 +358,24 @@ internal static class WallpaperTransition
     }
 
     /// <summary>
+    /// Whether the outgoing picture can be drawn from its file, which is what happens
+    /// when the wallpaper layer could not be copied.
+    ///
+    /// <para>
+    /// Only Fill, and only because this path has to reproduce the layout Explorer drew
+    /// closely enough that putting the cover up is invisible - the very problem the
+    /// copy does not have. Fill is the default and its rule is a single line; every
+    /// other fit falls through to the cut here, which is what the whole fade did
+    /// before the copy existed.
+    /// </para>
+    /// </summary>
+    private static bool CanRender(string? previousPath, WallpaperFit fit) =>
+        previousPath is not null
+        && previousPath.Length > 0
+        && fit == WallpaperFit.Fill
+        && File.Exists(previousPath);
+
+    /// <summary>
     /// Where a picture lands under Fill (WallpaperStyle 10): scaled to cover the
     /// target, aspect ratio kept, centred, whatever sticks out cropped away.
     /// </summary>
@@ -406,33 +400,267 @@ internal static class WallpaperTransition
     }
 
     /// <summary>
-    /// The window that holds the outgoing picture, and the timer that fades it out.
+    /// The window that holds the outgoing picture, the thread it lives on, and the
+    /// timer that fades it out.
     ///
     /// <para>
     /// A NativeWindow rather than a Form: this is a child of another process's window
-    /// with no chrome, no input and one message to answer, and a Form would bring a
+    /// with no chrome, no input and three messages to answer, and a Form would bring a
     /// control tree and a lifetime model that have nothing to do with any of that.
     /// </para>
+    /// <para>
+    /// Everything below runs on the fade thread except the four members the caller
+    /// uses to drive it - <see cref="ShowAsync"/>, <see cref="IsRunning"/>,
+    /// <see cref="BeginFade"/> and <see cref="Cancel"/> - which cross threads through
+    /// a task, two volatile flags and posted messages, and nothing else.
+    /// </para>
     /// </summary>
-    private sealed class Cover : NativeWindow, IDisposable
+    private sealed class Cover : NativeWindow
     {
-        private readonly Size _size;
+        private readonly string? _previousPath;
+        private readonly WallpaperFit _fit;
+        private readonly Thread _thread;
         private readonly System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
         private readonly Stopwatch _clock = new Stopwatch();
 
+        /// <summary>
+        /// Completed by the fade thread once the cover is up, or once it is certain it
+        /// will not be. Continuations run off the fade thread so that a caller waiting
+        /// on it cannot end up running on the thread that has a fade to draw.
+        /// </summary>
+        private readonly TaskCompletionSource<bool> _ready =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private ApplicationContext? _loop;
+        private Size _size;
         private IntPtr _memoryDc;
         private IntPtr _bitmap;
         private IntPtr _replacedBitmap;
         private int _hold;
         private int _ticks;
-        private bool _started;
-        private bool _disposed;
+        private int _relays;
+        private bool _fading;
 
-        public Cover(Size size)
+        /// <summary>Set by the fade thread when its message loop has ended.</summary>
+        private volatile bool _finished;
+
+        public Cover(string? previousPath, WallpaperFit fit)
         {
-            _size = size;
+            _previousPath = previousPath;
+            _fit = fit;
             _timer.Interval = TickMilliseconds;
             _timer.Tick += OnTick;
+
+            _thread = new Thread(Run)
+            {
+                // Background, so a fade can never be the reason the process stays
+                // alive; it is half a second of animation and nothing is lost by
+                // dropping it. STA because it hosts windows.
+                IsBackground = true,
+                Name = "wallpaper fade",
+            };
+            _thread.SetApartmentState(ApartmentState.STA);
+        }
+
+        /// <summary>Whether the fade thread is still there to be handed a change.</summary>
+        public bool IsRunning => !_finished;
+
+        /// <summary>
+        /// Starts the fade thread and reports whether the cover made it onto the
+        /// desktop. Awaited rather than waited on: the caller's own message loop keeps
+        /// running while this happens, and the wallpaper must not be applied until it
+        /// has an answer either way.
+        /// </summary>
+        public async Task<bool> ShowAsync()
+        {
+            _thread.Start();
+
+            Task<bool> ready = _ready.Task;
+            Task first = await Task
+                .WhenAny(ready, Task.Delay(ShowTimeoutMilliseconds))
+                .ConfigureAwait(true);
+
+            if (!ReferenceEquals(first, ready))
+            {
+                Logger.Warn("fade: the cover did not come up in time, cutting instead");
+
+                // It may still come up after this. Take it down the moment it does:
+                // a cover nobody is going to fade would leave the picture it was
+                // painted with frozen on top of the wallpaper that replaced it.
+                _ = ready.ContinueWith(
+                    (task, state) => ((Cover)state).Cancel(),
+                    this,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+
+                return false;
+            }
+
+            return await ready.ConfigureAwait(true);
+        }
+
+        /// <summary>
+        /// Tells the cover the wallpaper underneath it has changed, and it may start
+        /// fading after <paramref name="hold"/>. Safe to call more than once: see the
+        /// handler in <see cref="WndProc"/>.
+        /// </summary>
+        public void BeginFade(int hold) => Post(WM_FADE_BEGIN, hold);
+
+        /// <summary>Takes the cover down without waiting for it to be gone.</summary>
+        public void Cancel() => Post(WM_FADE_CANCEL, 0);
+
+        /// <summary>
+        /// Takes the cover down and waits for its thread to end, which is what releases
+        /// the input queue attachment to Explorer. The wait is bounded because the
+        /// thread it waits on is parented into another process's window: a wedged
+        /// Explorer must not be able to hold up this program's shutdown.
+        /// </summary>
+        public void CancelAndJoin()
+        {
+            Cancel();
+            if (!_thread.Join(JoinMilliseconds))
+            {
+                Logger.Warn("fade: the fade thread did not end in time, leaving it to the process exit");
+            }
+        }
+
+        private void Post(int message, int parameter)
+        {
+            IntPtr handle = Handle;
+            if (handle == IntPtr.Zero || _finished)
+            {
+                return;
+            }
+
+            NativeMethods.PostMessageW(handle, (uint)message, new IntPtr(parameter), IntPtr.Zero);
+        }
+
+        /// <summary>
+        /// The fade thread from end to end: build the cover, pump its messages until
+        /// the fade is over, then give every handle back.
+        /// </summary>
+        private void Run()
+        {
+            try
+            {
+                bool built = Build();
+                _ready.TrySetResult(built);
+                if (!built)
+                {
+                    return;
+                }
+
+                // Nothing else is ever queued to this thread, which is the point: a
+                // WM_TIMER is the lowest priority message there is, and on the main
+                // thread a burst of clicks starves it for the whole length of a fade.
+                _loop = new ApplicationContext();
+                Application.Run(_loop);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("fade: the fade thread failed error=" + ex.Message);
+                _ready.TrySetResult(false);
+            }
+            finally
+            {
+                Destroy();
+
+                // Last, so that a caller which sees the fade as finished also sees a
+                // thread that has already let go of Explorer's window.
+                _finished = true;
+            }
+        }
+
+        /// <summary>
+        /// Builds the cover and puts it up, opaque. False means this machine's desktop
+        /// is not the shape this needs, and the change should cut.
+        /// </summary>
+        private bool Build()
+        {
+            IntPtr previousContext = IntPtr.Zero;
+            try
+            {
+                // The process is system DPI aware (see app.manifest), which would report
+                // the monitors and size this window in the primary monitor's scale - the
+                // wrong pixel grid on a second monitor scaled differently. The wallpaper
+                // layer is physical pixels, so this thread is made per-monitor aware;
+                // nothing else in the process changes, and this one only lives for the
+                // fade anyway.
+                previousContext = NativeMethods.SetThreadDpiAwarenessContext(
+                    NativeMethods.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+                IntPtr host = FindWallpaperHost();
+                if (host == IntPtr.Zero)
+                {
+                    Logger.Warn("fade: no desktop wallpaper window, cutting instead");
+                    return false;
+                }
+
+                if (!NativeMethods.GetWindowRect(host, out NativeMethods.RECT hostRect))
+                {
+                    Logger.Warn("fade: the wallpaper window has no rectangle, cutting instead");
+                    return false;
+                }
+
+                // The desktop window has no frame, so its client origin is its window
+                // origin and a child at 0,0 covers exactly the virtual screen it spans.
+                Rectangle bounds = Rectangle.FromLTRB(
+                    hostRect.Left, hostRect.Top, hostRect.Right, hostRect.Bottom);
+                if (bounds.Width <= 0 || bounds.Height <= 0)
+                {
+                    Logger.Warn("fade: the wallpaper window is empty, cutting instead");
+                    return false;
+                }
+
+                _size = bounds.Size;
+                CreateSurface();
+
+                string source;
+                if (Capture(host))
+                {
+                    source = "capture";
+                }
+                else if (CanRender(_previousPath, _fit))
+                {
+                    Render(_previousPath!, bounds, GetMonitors(bounds));
+                    source = "render";
+                }
+                else
+                {
+                    Logger.Warn("fade: nothing to paint the cover with, cutting instead");
+                    return false;
+                }
+
+                Show(host);
+
+                if (Logger.IsEnabled(LogLevel.Debug))
+                {
+                    Logger.Debug(
+                        // IntPtr does not implement IFormattable on .NET Framework, so
+                        // the handle goes through Int64 to be formatted at all.
+                        "fade: covered host=0x" + host.ToInt64().ToString("X", CultureInfo.InvariantCulture) +
+                        " size=" + bounds.Width.ToString(CultureInfo.InvariantCulture) +
+                        "x" + bounds.Height.ToString(CultureInfo.InvariantCulture) +
+                        " source=" + source);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("fade: preparing the crossfade failed, cutting instead error=" + ex.Message);
+                return false;
+            }
+            finally
+            {
+                if (previousContext != IntPtr.Zero)
+                {
+                    // No try needed: a non-zero value means the first call resolved and
+                    // succeeded, so this one cannot fail to find the entry point either.
+                    NativeMethods.SetThreadDpiAwarenessContext(previousContext);
+                }
+            }
         }
 
         /// <summary>
@@ -445,7 +673,7 @@ internal static class WallpaperTransition
         /// tens of megabytes. Painting is then a single BitBlt, and so is filling it.
         /// </para>
         /// </summary>
-        public void CreateSurface()
+        private void CreateSurface()
         {
             IntPtr screen = NativeMethods.GetDC(IntPtr.Zero);
             if (screen == IntPtr.Zero)
@@ -496,7 +724,7 @@ internal static class WallpaperTransition
         /// else.
         /// </para>
         /// </summary>
-        public bool Capture(IntPtr host)
+        private bool Capture(IntPtr host)
         {
             IntPtr hostDc = NativeMethods.GetDC(host);
             if (hostDc == IntPtr.Zero)
@@ -535,7 +763,7 @@ internal static class WallpaperTransition
         /// Draws the outgoing picture into the surface from its file. The fallback for
         /// a copy that came back blank - see <see cref="Capture"/> and CanRender.
         /// </summary>
-        public void Render(string path, Rectangle bounds, List<Rectangle> monitors)
+        private void Render(string path, Rectangle bounds, List<Rectangle> monitors)
         {
             // Read the file rather than decode from it: Image.FromStream keeps reading
             // from the stream for as long as the image lives, and this picture is the
@@ -568,7 +796,7 @@ internal static class WallpaperTransition
         }
 
         /// <summary>Puts the cover up, opaque, underneath the desktop icons.</summary>
-        public void Show(IntPtr host)
+        private void Show(IntPtr host)
         {
             CreateParams parameters = new CreateParams
             {
@@ -581,7 +809,8 @@ internal static class WallpaperTransition
                 Style = NativeMethods.WS_CHILD | NativeMethods.WS_VISIBLE | NativeMethods.WS_DISABLED,
                 ExStyle = NativeMethods.WS_EX_LAYERED
                     | NativeMethods.WS_EX_TRANSPARENT
-                    | NativeMethods.WS_EX_NOACTIVATE,
+                    | NativeMethods.WS_EX_NOACTIVATE
+                    | NativeMethods.WS_EX_NOPARENTNOTIFY,
             };
 
             CreateHandle(parameters);
@@ -611,48 +840,34 @@ internal static class WallpaperTransition
         }
 
         /// <summary>
-        /// Starts the fade, holding the cover opaque for <paramref name="hold"/> first.
+        /// Ends the message loop, which sends <see cref="Run"/> on to release the
+        /// window and the bitmap.
         /// </summary>
-        public void Start(int hold)
+        private void Finish()
         {
-            if (_disposed)
-            {
-                // Cancelled while the wallpaper was being applied - shutdown, or a
-                // second change on its heels. The window is already gone and the
-                // desktop already shows the new picture.
-                return;
-            }
-
-            _hold = hold;
-            _started = true;
-            _clock.Start();
-            _timer.Start();
+            _timer.Stop();
+            _loop?.ExitThread();
         }
 
-        public void Dispose()
+        /// <summary>Releases everything the fade thread owns. Runs on that thread.</summary>
+        private void Destroy()
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-
             _timer.Stop();
             _timer.Tick -= OnTick;
             _timer.Dispose();
             _clock.Stop();
 
-            if (_started && Logger.IsEnabled(LogLevel.Debug))
+            if (_fading && Logger.IsEnabled(LogLevel.Debug))
             {
                 // ticks is the whole diagnosis when a fade did not appear on screen:
                 // the alpha follows the clock, so one single tick means the timer was
                 // starved for the entire fade and the only tick to arrive found it
-                // already over. WM_TIMER is the lowest priority message there is.
+                // already over. relays counts the changes this one cover absorbed.
                 Logger.Debug(
                     "fade: done ticks=" + _ticks.ToString(CultureInfo.InvariantCulture) +
                     " elapsed=" + _clock.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) +
-                    " hold=" + _hold.ToString(CultureInfo.InvariantCulture));
+                    " hold=" + _hold.ToString(CultureInfo.InvariantCulture) +
+                    " relays=" + _relays.ToString(CultureInfo.InvariantCulture));
             }
 
             // The window first: it is the only thing that paints out of the device
@@ -683,11 +898,6 @@ internal static class WallpaperTransition
                 NativeMethods.DeleteObject(_bitmap);
                 _bitmap = IntPtr.Zero;
             }
-
-            if (ReferenceEquals(_active, this))
-            {
-                _active = null;
-            }
         }
 
         protected override void WndProc(ref Message m)
@@ -714,9 +924,49 @@ internal static class WallpaperTransition
                     m.Result = IntPtr.Zero;
                     return;
                 }
+
+                case WM_FADE_BEGIN:
+                    OnBeginFade(m.WParam.ToInt32());
+                    return;
+
+                case WM_FADE_CANCEL:
+                    Finish();
+                    return;
             }
 
             base.WndProc(ref m);
+        }
+
+        /// <summary>
+        /// Starts the fade, or puts the hold back to the beginning when a second
+        /// change lands on a cover that is still opaque.
+        ///
+        /// <para>
+        /// Restarting is what makes a burst of clicks read as one transition: every
+        /// change arriving while the cover is still hiding the desktop is invisible,
+        /// and the fade that eventually runs goes from the first picture straight to
+        /// the last. It is deliberately not done once the alpha has started moving -
+        /// putting a half faded cover back to opaque is a flash, and a worse artefact
+        /// than the change it would be hiding.
+        /// </para>
+        /// </summary>
+        private void OnBeginFade(int hold)
+        {
+            if (!_fading)
+            {
+                _fading = true;
+                _hold = hold;
+                _clock.Start();
+                _timer.Start();
+                return;
+            }
+
+            _relays++;
+            if (_clock.ElapsedMilliseconds < _hold)
+            {
+                _hold = hold;
+                _clock.Restart();
+            }
         }
 
         /// <summary>
@@ -769,7 +1019,7 @@ internal static class WallpaperTransition
                 double progress = (elapsed - _hold) / (double)FadeMilliseconds;
                 if (progress >= 1.0)
                 {
-                    Dispose();
+                    Finish();
                     return;
                 }
 
@@ -784,7 +1034,7 @@ internal static class WallpaperTransition
             {
                 // The new wallpaper is already underneath, so ending here is a cut.
                 Logger.Warn("fade: stopped early error=" + ex.Message);
-                Dispose();
+                Finish();
             }
         }
     }

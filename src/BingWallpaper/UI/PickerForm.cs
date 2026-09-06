@@ -88,6 +88,15 @@ internal sealed class PickerForm : Form
     private bool _titlesLoaded;
     private bool _busy;
 
+    /// <summary>Set while <see cref="ApplyFavoriteAsync"/> owns <see cref="_busy"/>.</summary>
+    private bool _applyingFavorite;
+
+    /// <summary>
+    /// The favourite clicked while another one was still being applied, or null. One
+    /// slot rather than a queue: see <see cref="ApplyFavoriteAsync"/>.
+    /// </summary>
+    private int? _pendingFavorite;
+
     public PickerForm(TrayContext context)
     {
         _context = context;
@@ -606,20 +615,71 @@ internal sealed class PickerForm : Form
         }
     }
 
+    /// <summary>
+    /// Applies the favourite at <paramref name="index"/>, and keeps applying whichever
+    /// tile was clicked last until the clicking stops.
+    ///
+    /// <para>
+    /// A favourite is on disk, so a click here is a transcode and a registry write and
+    /// nothing else - fast enough to invite clicking again before it is done, slow
+    /// enough that running every click back to back means a locked up window. Dropping
+    /// the ones that arrive while it is busy would be worse than either: the desktop
+    /// would settle on the tile clicked *first*, which is the one the user changed
+    /// their mind about.
+    /// </para>
+    /// <para>
+    /// So the last click wins and the ones before it are forgotten rather than queued.
+    /// Ten clicks cost two applies, and the crossfade behind them collapses into a
+    /// single transition from the first picture to the last - see WallpaperTransition.
+    /// </para>
+    /// </summary>
     private async Task ApplyFavoriteAsync(int index)
     {
-        if (_busy || index < 0 || index >= _favoriteItems.Count)
+        if (index < 0 || index >= _favoriteItems.Count)
         {
             return;
         }
 
+        if (_applyingFavorite)
+        {
+            _pendingFavorite = index;
+            return;
+        }
+
+        if (_busy)
+        {
+            // Something else owns the window - a delete, a download, a tile being
+            // favourited. Remembering the click for *that* to pick up would mean
+            // applying a wallpaper nobody asked for by the time it finished.
+            return;
+        }
+
         _busy = true;
-        FavoriteItem item = _favoriteItems[index];
+        _applyingFavorite = true;
         try
         {
-            SetTransientStatus(await _context.ApplyFavoriteAsync(item.FileName).ConfigureAwait(true)
-                ? "已锁定：" + item.DisplayDate + " · " + item.Title
-                : "应用失败，详见日志文件。");
+            while (true)
+            {
+                FavoriteItem item = _favoriteItems[index];
+                SetTransientStatus(await _context.ApplyFavoriteAsync(item.FileName).ConfigureAwait(true)
+                    ? "已锁定：" + item.DisplayDate + " · " + item.Title
+                    : "应用失败，详见日志文件。");
+
+                if (_pendingFavorite is null)
+                {
+                    break;
+                }
+
+                index = _pendingFavorite.Value;
+                _pendingFavorite = null;
+
+                // The folder can be rescanned while this loop runs - a delete, a tile
+                // un-favourited - so the remembered index is checked again, not trusted.
+                if (index < 0 || index >= _favoriteItems.Count)
+                {
+                    break;
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -628,6 +688,8 @@ internal sealed class PickerForm : Form
         }
         finally
         {
+            _applyingFavorite = false;
+            _pendingFavorite = null;
             _busy = false;
             _grid.Invalidate();
         }

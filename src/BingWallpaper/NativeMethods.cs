@@ -163,6 +163,12 @@ internal static class NativeMethods
     public const int WM_ERASEBKGND = 0x0014;
 
     /// <summary>
+    /// WM_APP - winuser.h. The first message number reserved for an application's
+    /// own use; nothing in the system ever sends one of these.
+    /// </summary>
+    public const int WM_APP = 0x8000;
+
+    /// <summary>
     /// Undocumented Progman message; it has no name in any header, only the number.
     /// It asks Explorer to split the desktop into the window that hosts the icons and
     /// a WorkerW behind it - the same split Explorer makes for itself to crossfade a
@@ -193,6 +199,14 @@ internal static class NativeMethods
 
     /// <summary>WS_EX_TRANSPARENT - hit testing falls through to what is underneath.</summary>
     public const int WS_EX_TRANSPARENT = 0x00000020;
+
+    /// <summary>
+    /// WS_EX_NOPARENTNOTIFY - winuser.h. Creating a child window *sends*
+    /// WM_PARENTNOTIFY to its parent, and the parent here belongs to Explorer, so
+    /// that one message would make CreateWindowEx wait on another process. This
+    /// style is what keeps the cover's thread from being pinned by a busy Explorer.
+    /// </summary>
+    public const int WS_EX_NOPARENTNOTIFY = 0x00000004;
 
     /// <summary>WS_EX_NOACTIVATE - never take the focus, winuser.h.</summary>
     public const int WS_EX_NOACTIVATE = 0x08000000;
@@ -249,6 +263,16 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr SendMessageTimeoutW(
         IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint milliseconds, out IntPtr result);
+
+    /// <summary>
+    /// user32!PostMessageW. Available since Windows 2000. Puts the message in the
+    /// target thread's queue and returns at once - which is the whole reason it is
+    /// used here rather than SendMessage: the thread posting must never end up
+    /// waiting on the thread that runs the fade.
+    /// </summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool PostMessageW(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
 
     /// <summary>user32!GetWindowRect. Available since Windows 2000.</summary>
     [DllImport("user32.dll")]

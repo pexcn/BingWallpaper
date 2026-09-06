@@ -62,6 +62,14 @@ internal sealed class TrayContext : ApplicationContext
     private bool _busy;
 
     /// <summary>
+    /// Set while a favourite started from the tray menu is being applied. Separate
+    /// from <see cref="_busy"/>, which greys the menu and belongs to the refresh: a
+    /// favourite needs no network and should not make the program look busy for the
+    /// third of a second it takes.
+    /// </summary>
+    private bool _applyingFavorite;
+
+    /// <summary>
     /// Which list the two stepping rows walk: favorites\ when set, the 8 day window
     /// when not.
     ///
@@ -298,8 +306,10 @@ internal sealed class TrayContext : ApplicationContext
             _disposed = true;
             ThemeManager.ThemeChanged -= OnThemeChanged;
 
-            // A fade still running owns a window parented into Explorer's desktop and
-            // a timer on this thread; both go before the message loop that drives them.
+            // A fade still running owns a window parented into Explorer's desktop, on
+            // a thread of its own. This ends that thread and waits for it, so the
+            // input queue attachment the child window created is gone before the
+            // process is - with a timeout, because it is Explorer on the other end.
             WallpaperTransition.Cancel();
 
             try
@@ -714,12 +724,18 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     private bool MoveWithinFavorites(int delta)
     {
-        if (_busy)
+        if (_busy || _applyingFavorite)
         {
             // The rows are greyed while busy, but the menu was measured before the
             // refresh started and the click can still land. Dropped the way
             // MoveToAsync drops it, and reported as handled either way: the 8 day
             // path would only reach the same guard.
+            //
+            // _applyingFavorite is the same guard for the step before this one, which
+            // no longer finishes inside the click that started it. Reaching it takes
+            // reopening the menu inside half a second, so this is a rail rather than a
+            // throttle - the picker is where clicks actually arrive in bursts, and it
+            // remembers the last one instead of dropping it.
             return true;
         }
 
@@ -766,6 +782,7 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     private async Task StepIntoFavoriteAsync(string fileName)
     {
+        _applyingFavorite = true;
         try
         {
             if (!await ApplyFavoriteAsync(fileName).ConfigureAwait(true))
@@ -777,6 +794,10 @@ internal sealed class TrayContext : ApplicationContext
         {
             Logger.Error("switch: stepping through the favourites failed", ex);
             ErrorDialog.Show("切换壁纸失败", Logger.Describe(ex));
+        }
+        finally
+        {
+            _applyingFavorite = false;
         }
     }
 
