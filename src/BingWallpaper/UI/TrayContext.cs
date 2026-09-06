@@ -189,7 +189,17 @@ internal sealed class TrayContext : ApplicationContext
             Visible = true,
             ContextMenu = _menu,
         };
-        _tray.DoubleClick += (_, _) => ShowPicker();
+        // NotifyIcon funnels WM_LBUTTONDBLCLK / WM_RBUTTONDBLCLK / WM_MBUTTONDBLCLK into one
+        // handler and raises DoubleClick for all of them, so the picker would also open on a
+        // right double click, behind the context menu. MouseDoubleClick carries the button,
+        // which is the only way to tell them apart here.
+        _tray.MouseDoubleClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ShowPicker();
+            }
+        };
 
         // NotifyIcon shows the menu from WM_RBUTTONUP and only raises MouseUp once
         // TrackPopupMenuEx has returned, so this runs with the menu already closed.
