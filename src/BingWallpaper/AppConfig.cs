@@ -44,6 +44,9 @@ internal sealed class AppConfig
     public const int MaxRefreshIntervalHours = 168;
     public const int MaxKeepDays = 3650;
 
+    public const int MinShuffleIntervalMinutes = 1;
+    public const int MaxShuffleIntervalMinutes = 1440;
+
     public string Market { get; set; } = "zh-CN";
 
     public ResolutionKind Resolution { get; set; } = ResolutionKind.Uhd;
@@ -66,6 +69,22 @@ internal sealed class AppConfig
     public ThemeMode Theme { get; set; } = ThemeMode.System;
 
     public int RefreshIntervalHours { get; set; } = 1;
+
+    /// <summary>
+    /// Whether the wallpaper rotates at random through favorites\ instead of
+    /// following the daily picture.
+    ///
+    /// <para>
+    /// The third of three mutually exclusive answers to "what decides the wallpaper",
+    /// next to the refresh timer and <see cref="PinnedWallpaper"/>. So locking a
+    /// picture ends the rotation and starting the rotation releases the lock; the end
+    /// of <see cref="Load"/> is the one place both can arrive already set.
+    /// </para>
+    /// </summary>
+    public bool Shuffle { get; set; }
+
+    /// <summary>How long each picture of the rotation stays on the desktop.</summary>
+    public int ShuffleIntervalMinutes { get; set; } = 10;
 
     /// <summary>0 means "keep forever".</summary>
     public int KeepDays { get; set; } = 30;
@@ -112,10 +131,25 @@ internal sealed class AppConfig
             GetInt(values, "RefreshIntervalHours", 1),
             MinRefreshIntervalHours,
             MaxRefreshIntervalHours);
+        config.Shuffle = GetBool(values, "Shuffle", false);
+        config.ShuffleIntervalMinutes = Clamp(
+            GetInt(values, "ShuffleIntervalMinutes", 10),
+            MinShuffleIntervalMinutes,
+            MaxShuffleIntervalMinutes);
         config.KeepDays = Clamp(GetInt(values, "KeepDays", 30), 0, MaxKeepDays);
         config.RunAtStartup = GetBool(values, "RunAtStartup", false);
         config.LogLevel = ParseEnum(GetString(values, "LogLevel", "Info"), LogLevel.Info);
         config.PinnedWallpaper = SanitizeFileName(GetString(values, "PinnedWallpaper", string.Empty));
+
+        // A hand edited file can say both of these at once. The lock wins: it names
+        // one specific picture, which is the narrower instruction of the two, and it
+        // is the one that would be lost without a trace if the other did.
+        if (config.Shuffle && config.IsPinned)
+        {
+            config.Shuffle = false;
+            Logger.Warn("config: shuffle ignored, a wallpaper is pinned file=" + config.PinnedWallpaper);
+        }
+
         return config;
     }
 
@@ -129,6 +163,9 @@ internal sealed class AppConfig
         sb.AppendLine("FadeTransition=" + (FadeTransition ? "true" : "false"));
         sb.AppendLine("Theme=" + Theme);
         sb.AppendLine("RefreshIntervalHours=" + RefreshIntervalHours.ToString(CultureInfo.InvariantCulture));
+        sb.AppendLine("Shuffle=" + (Shuffle ? "true" : "false"));
+        sb.AppendLine(
+            "ShuffleIntervalMinutes=" + ShuffleIntervalMinutes.ToString(CultureInfo.InvariantCulture));
         sb.AppendLine("KeepDays=" + KeepDays.ToString(CultureInfo.InvariantCulture));
         sb.AppendLine("RunAtStartup=" + (RunAtStartup ? "true" : "false"));
         sb.AppendLine("LogLevel=" + LogLevel);

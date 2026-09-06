@@ -24,7 +24,7 @@ internal sealed class TrayContext : ApplicationContext
     ///
     /// <para>
     /// It is the widest row and therefore the one that sets the width of the whole
-    /// menu, and a menu wider than the seven short rows underneath it stops reading
+    /// menu, and a menu wider than the eight short rows underneath it stops reading
     /// as a tray menu at all. The full title is a hover away in the tooltip and
     /// spelled out in the picker, so the row can afford to be the short one.
     /// </para>
@@ -38,6 +38,16 @@ internal sealed class TrayContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private readonly System.Windows.Forms.Timer _timer;
 
+    /// <summary>
+    /// Drives the random rotation. Separate from <see cref="_timer"/> rather than
+    /// folded into it: that one is the hourly metadata check and this one runs in
+    /// minutes, and in this mode neither wants what the other does - see
+    /// <see cref="RunRefreshPassAsync"/>.
+    /// </summary>
+    private readonly System.Windows.Forms.Timer _shuffleTimer;
+
+    private readonly ShufflePlaylist _playlist = new();
+
     // Replaced after every right click, see RecreateMenu.
     private ContextMenu _menu;
 
@@ -46,6 +56,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly MenuItem _olderItem;
     private readonly MenuItem _pickerItem;
     private readonly MenuItem _refreshItem;
+    private readonly MenuItem _shuffleItem;
     private readonly MenuItem _pinItem;
     private readonly MenuItem _folderItem;
     private readonly MenuItem _settingsItem;
@@ -62,10 +73,10 @@ internal sealed class TrayContext : ApplicationContext
     private bool _busy;
 
     /// <summary>
-    /// Set while a favourite started from the tray menu is being applied. Separate
-    /// from <see cref="_busy"/>, which greys the menu and belongs to the refresh: a
-    /// favourite needs no network and should not make the program look busy for the
-    /// third of a second it takes.
+    /// Set while a favourite started from the tray menu or by the rotation is being
+    /// applied. Separate from <see cref="_busy"/>, which greys the menu and belongs to
+    /// the refresh: a favourite needs no network and should not make the program look
+    /// busy for the third of a second it takes.
     /// </summary>
     private bool _applyingFavorite;
 
@@ -92,9 +103,9 @@ internal sealed class TrayContext : ApplicationContext
     private bool _steppingFavorites;
 
     // File name the two below were read for; empty when nothing is cached.
-    private string _pinnedMetadataFor = string.Empty;
-    private string? _pinnedTitle;
-    private string? _pinnedLink;
+    private string _appliedMetadataFor = string.Empty;
+    private string? _appliedTitle;
+    private string? _appliedLink;
 
     /// <summary>
     /// Set when a trigger arrives while a refresh is running. These used to be dropped,
@@ -136,6 +147,7 @@ internal sealed class TrayContext : ApplicationContext
         _olderItem = new MenuItem("上一张", (_, _) => MoveBy(1)) { Enabled = false };
         _pickerItem = new MenuItem("选择壁纸...", (_, _) => ShowPicker());
         _refreshItem = new MenuItem("立即刷新", (_, _) => StartRefresh(userInitiated: true));
+        _shuffleItem = new MenuItem("随机轮播", (_, _) => SetShuffle(!_config.Shuffle));
         _pinItem = new MenuItem("锁定当前壁纸", (_, _) => TogglePin()) { Enabled = false };
         _folderItem = new MenuItem("打开壁纸目录", (_, _) => OpenWallpaperFolder());
         _settingsItem = new MenuItem("设置...", (_, _) => ShowSettings());
@@ -166,6 +178,11 @@ internal sealed class TrayContext : ApplicationContext
         _timer.Tick += (_, _) => StartRefresh(userInitiated: false);
         _timer.Start();
 
+        // Started below rather than here: it is only running in one of the three
+        // modes, and the first draw has to wait for the message loop anyway.
+        _shuffleTimer = new System.Windows.Forms.Timer { Interval = GetShuffleIntervalMilliseconds() };
+        _shuffleTimer.Tick += (_, _) => StepShuffle(forward: true);
+
         ThemeManager.ThemeChanged += OnThemeChanged;
 
         // Before the first network call: from here on the cleanup passes and the
@@ -173,8 +190,20 @@ internal sealed class TrayContext : ApplicationContext
         // in flight.
         RestorePinnedWallpaper();
 
-        // Run the first check as soon as the message loop starts.
-        _window.BeginInvoke(new Action(() => StartRefresh(userInitiated: false)));
+        // Run the first check as soon as the message loop starts - and, when the
+        // rotation is on, draw a picture straight away instead of at the end of the
+        // first interval: what someone turns it on for is that the wallpaper changes.
+        // Both need the loop running, the refresh for its synchronization context and
+        // the draw for the fade, which parents a window of its own.
+        _window.BeginInvoke(new Action(() =>
+        {
+            StartRefresh(userInitiated: false);
+            if (_config.Shuffle)
+            {
+                _shuffleTimer.Start();
+                StepShuffle(forward: true);
+            }
+        }));
     }
 
     /// <summary>Metadata of the last 8 days, newest first.</summary>
@@ -323,6 +352,8 @@ internal sealed class TrayContext : ApplicationContext
 
             _timer.Stop();
             _timer.Dispose();
+            _shuffleTimer.Stop();
+            _shuffleTimer.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
             _menu.Dispose();
@@ -409,6 +440,19 @@ internal sealed class TrayContext : ApplicationContext
             if (_config.IsPinned)
             {
                 await EnsurePinnedAsync().ConfigureAwait(true);
+            }
+            else if (_config.Shuffle)
+            {
+                // The desktop belongs to the rotation, so this pass only keeps the
+                // cache current: today's picture is downloaded so it can be starred
+                // from the recent tab, and the two passes below still have a settled
+                // folder to work on. Deliberately not applied - and EnsureCachedAsync
+                // leaves _currentIndex and _appliedImage alone, so the menu keeps
+                // describing the picture the rotation put up.
+                if (images.Count > 0)
+                {
+                    await EnsureCachedAsync(images[0]).ConfigureAwait(true);
+                }
             }
             else
             {
@@ -570,13 +614,25 @@ internal sealed class TrayContext : ApplicationContext
     private void SetPinned(string? fileName)
     {
         string value = fileName ?? string.Empty;
-        if (string.Equals(_config.PinnedWallpaper, value, StringComparison.OrdinalIgnoreCase))
+
+        // Locking a picture is the natural way out of the rotation - it is what "stop
+        // here, I like this one" looks like - so every path that sets a lock ends it,
+        // the picker's included. Written in this save rather than through SetShuffle,
+        // which would put a second write of the INI file behind the one click.
+        bool stopShuffle = value.Length > 0 && _config.Shuffle;
+        if (!stopShuffle && string.Equals(_config.PinnedWallpaper, value, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
         string previous = _config.PinnedWallpaper;
+        bool previousShuffle = _config.Shuffle;
         _config.PinnedWallpaper = value;
+        if (stopShuffle)
+        {
+            _config.Shuffle = false;
+        }
+
         try
         {
             _config.Save(Paths.ConfigFile);
@@ -584,9 +640,19 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex)
         {
             _config.PinnedWallpaper = previous;
+            _config.Shuffle = previousShuffle;
             Logger.Error("pin: saving the configuration failed", ex);
             ErrorDialog.Show("保存设置失败", Logger.Describe(ex));
             return;
+        }
+
+        if (stopShuffle)
+        {
+            // Only the rotation is torn down here, never the wallpaper: the picture
+            // it last put up is the one being locked.
+            _shuffleTimer.Stop();
+            _playlist.Clear();
+            Logger.Info("shuffle: disabled, the wallpaper was locked");
         }
 
         if (value.Length == 0)
@@ -613,24 +679,7 @@ internal sealed class TrayContext : ApplicationContext
                 return;
             }
 
-            // Back under the timer: restart it so the first automatic change is a
-            // full interval away, and go to today's picture now rather than at some
-            // arbitrary point within the hour.
-            _timer.Stop();
-            _timer.Start();
-
-            if (HasTodaysMetadata())
-            {
-                // The list already names today's picture, so fetching it again could
-                // only return the same entry. Applying it straight from the cache
-                // keeps releasing a pin off the network entirely. Skipping the
-                // refresh also skips its cleanup pass, which is what would drop the
-                // file that just lost its protection - the next cycle does that.
-                _ = MoveToAsync(0, pinAfterwards: false);
-                return;
-            }
-
-            StartRefresh(userInitiated: true);
+            ReturnToDailyWallpaper();
             return;
         }
 
@@ -640,6 +689,33 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         SetPinned(Path.GetFileName(_appliedPath));
+    }
+
+    /// <summary>
+    /// Hands the desktop back to the refresh timer. Both of the other two modes end
+    /// here, because both are the same thing to leave: something that was deciding
+    /// the wallpaper has stopped, and today's picture is what that falls back to.
+    /// </summary>
+    private void ReturnToDailyWallpaper()
+    {
+        // Restart the timer so the first automatic change is a full interval away,
+        // and go to today's picture now rather than at some arbitrary point within
+        // the hour.
+        _timer.Stop();
+        _timer.Start();
+
+        if (HasTodaysMetadata())
+        {
+            // The list already names today's picture, so fetching it again could only
+            // return the same entry. Applying it straight from the cache keeps this
+            // off the network entirely. Skipping the refresh also skips its cleanup
+            // pass, which is what would drop the file that just lost its protection -
+            // the next cycle does that.
+            _ = MoveToAsync(0, pinAfterwards: false);
+            return;
+        }
+
+        StartRefresh(userInitiated: true);
     }
 
     /// <summary>
@@ -675,6 +751,19 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     private void MoveBy(int delta)
     {
+        if (_config.Shuffle)
+        {
+            // Asked before InFavoriteMode and not through it: the rotation runs with
+            // no pin set, which is the very thing InFavoriteMode reads, so both rows
+            // would otherwise fall through to the eight day window.
+            //
+            // A negative delta is "下一张", which walks the list towards the newer
+            // end. A shuffled round has no newer or older, only a play position, and
+            // the one that row steps towards is forward.
+            StepShuffle(forward: delta < 0);
+            return;
+        }
+
         if (InFavoriteMode && MoveWithinFavorites(delta))
         {
             return;
@@ -801,6 +890,193 @@ internal sealed class TrayContext : ApplicationContext
         }
     }
 
+    /// <summary>
+    /// The only writer of <see cref="AppConfig.Shuffle"/>. Like <see cref="SetPinned"/>
+    /// the value in memory changes only once it is on disk, so a failed save leaves
+    /// the program and the configuration file saying the same thing.
+    /// </summary>
+    private void SetShuffle(bool enabled)
+    {
+        if (_config.Shuffle == enabled)
+        {
+            return;
+        }
+
+        _config.Shuffle = enabled;
+        try
+        {
+            _config.Save(Paths.ConfigFile);
+        }
+        catch (Exception ex)
+        {
+            _config.Shuffle = !enabled;
+            Logger.Error("shuffle: saving the configuration failed", ex);
+            ErrorDialog.Show("保存设置失败", Logger.Describe(ex));
+            return;
+        }
+
+        OnShuffleModeChanged();
+    }
+
+    /// <summary>
+    /// Brings the rotation into line with <see cref="AppConfig.Shuffle"/>, whichever
+    /// of the two ways it was just changed - the menu row or the settings window.
+    /// </summary>
+    private void OnShuffleModeChanged()
+    {
+        if (!_config.Shuffle)
+        {
+            _shuffleTimer.Stop();
+            _playlist.Clear();
+            Logger.Info("shuffle: disabled");
+            UpdateMenuState();
+
+            // Something that was deciding the wallpaper has stopped, which is the same
+            // situation releasing a lock leaves behind, so it ends the same way.
+            ReturnToDailyWallpaper();
+            return;
+        }
+
+        // Releasing the lock rather than refusing to start: the two are mutually
+        // exclusive, and the click that arrived is the newer instruction. Unlike the
+        // reverse direction in SetPinned this cannot share the save - the settings
+        // window has already written the file by the time it gets here - but it costs
+        // nothing in the common case, where SetPinned returns without writing.
+        SetPinned(null);
+        if (_config.IsPinned)
+        {
+            // The save failed and SetPinned has already said so. The lock still
+            // stands, so the rotation must not start: the flag goes back by hand
+            // rather than through SetShuffle, which would retry the save that just
+            // failed and, were it to get through, move the desktop off the very
+            // picture that is still locked. The file is left saying Shuffle=true,
+            // which Load normalizes to this same state on the next start.
+            _config.Shuffle = false;
+            UpdateMenuState();
+            return;
+        }
+
+        _playlist.Clear();
+        _shuffleTimer.Interval = GetShuffleIntervalMilliseconds();
+        _shuffleTimer.Start();
+        Logger.Info("shuffle: enabled interval=" + _config.ShuffleIntervalMinutes + "m");
+
+        // Before the step and not left to it: the step may find nothing to do, and the
+        // tick on the menu row has to be right either way.
+        UpdateMenuState();
+
+        if (!StepShuffle(forward: true) && _playlist.Count == 0)
+        {
+            // A rotation with nothing to rotate does nothing at all, which from the
+            // outside is indistinguishable from the click not having registered. Said
+            // in a balloon rather than a dialog: the shell draws it, the way it draws
+            // the menu this was clicked in, and nothing here is worth a modal window.
+            _tray.ShowBalloonTip(
+                5000,
+                "随机轮播",
+                "收藏夹是空的。在「选择壁纸」里收藏几张之后才有可以轮播的图片。",
+                ToolTipIcon.Info);
+        }
+    }
+
+    /// <summary>
+    /// Moves the rotation one picture and puts it on the desktop. Reports whether
+    /// there was anywhere to move to.
+    /// </summary>
+    private bool StepShuffle(bool forward)
+    {
+        // Ahead of the guard below, cheap enough that a dropped step can afford it:
+        // it keeps the round in step with the folder whatever happens next, and it is
+        // what makes Count mean "how many favourites are there" to a caller reading it
+        // after a false.
+        _playlist.Sync(Favorites.Scan());
+
+        if (_applyingFavorite)
+        {
+            // The previous step has not finished. Dropped rather than queued, the way
+            // MoveWithinFavorites drops one: the next tick is along shortly, and the
+            // only way to reach this by hand is to reopen the menu inside the third of
+            // a second an apply takes.
+            Logger.Debug("shuffle: step dropped, an apply is still running");
+            return false;
+        }
+
+        string? fileName = forward ? _playlist.Next() : _playlist.Previous();
+        if (fileName is null)
+        {
+            // An empty folder, or the start of the round with nothing behind it.
+            Logger.Debug("shuffle: nothing to step to forward=" + forward + " count=" + _playlist.Count);
+            return false;
+        }
+
+        // Re-applying the picture that is already on the desktop is a full transcode
+        // for no visible change - and with a single favourite it is every tick.
+        if (_appliedPath is not null
+            && string.Equals(Path.GetFileName(_appliedPath), fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            Logger.Debug("shuffle: already on the desktop file=" + fileName);
+            RestartShuffleTimer();
+            return true;
+        }
+
+        Logger.Info(
+            "shuffle: applying file=" + fileName +
+            " position=" + _playlist.Position + "/" + _playlist.Count);
+
+        // Before the apply, not after: the apply is not awaited, and a step made by
+        // hand should get a whole interval to itself either way.
+        RestartShuffleTimer();
+        _ = ShuffleIntoAsync(fileName);
+        return true;
+    }
+
+    /// <summary>
+    /// Applies one picture for the rotation.
+    ///
+    /// <para>
+    /// Unlike <see cref="StepIntoFavoriteAsync"/> a failure raises no dialog. Almost
+    /// every one of them is the same race - the file left favorites\ between the scan
+    /// and the apply - and the answer to it is the next step, which draws from a list
+    /// the folder has been re-read into. A modal window that can appear on a timer
+    /// while nobody is at the machine would be the worse failure of the two.
+    /// </para>
+    /// </summary>
+    private async Task ShuffleIntoAsync(string fileName)
+    {
+        _applyingFavorite = true;
+        try
+        {
+            if (await ApplyFavoriteCoreAsync(fileName).ConfigureAwait(true))
+            {
+                UpdateMenuState();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("shuffle: applying failed file=" + fileName, ex);
+        }
+        finally
+        {
+            _applyingFavorite = false;
+        }
+    }
+
+    /// <summary>
+    /// Gives the current picture a full interval. Stop then Start, not Enabled: an
+    /// already running timer keeps counting from where it was, so a step made by hand
+    /// would otherwise be replaced by the rotation moments later.
+    /// </summary>
+    private void RestartShuffleTimer()
+    {
+        if (!_config.Shuffle)
+        {
+            return;
+        }
+
+        _shuffleTimer.Stop();
+        _shuffleTimer.Start();
+    }
+
     private async Task MoveToAsync(int index, bool pinAfterwards)
     {
         if (_busy)
@@ -882,6 +1158,32 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     public async Task<bool> ApplyFavoriteAsync(string fileName)
     {
+        if (!await ApplyFavoriteCoreAsync(fileName).ConfigureAwait(true))
+        {
+            return false;
+        }
+
+        // The one place stepping switches to the folder, and note it is set even when
+        // FindImageIndex found the picture in the window as well: the click was on the
+        // favourites tab, and that is the whole question.
+        _steppingFavorites = true;
+        SetPinned(fileName);
+        UpdateMenuState();
+        return true;
+    }
+
+    /// <summary>
+    /// Puts a favourite on the desktop and nothing else - no lock, no stepping list.
+    ///
+    /// <para>
+    /// Split out for the rotation, which applies a picture every few minutes and must
+    /// not do either: the lock is a different mode and would rewrite the INI file on
+    /// every change, and the stepping list is about which folder a click walks, which
+    /// the rotation answers for itself.
+    /// </para>
+    /// </summary>
+    private async Task<bool> ApplyFavoriteCoreAsync(string fileName)
+    {
         string path = Paths.ResolveWallpaperFile(fileName);
         if (!File.Exists(path))
         {
@@ -899,13 +1201,6 @@ internal sealed class TrayContext : ApplicationContext
         _appliedPath = path;
         _currentIndex = FindImageIndex(fileName);
         _appliedImage = _currentIndex >= 0 ? _images[_currentIndex] : null;
-
-        // The one place stepping switches to the folder, and note it is set even when
-        // FindImageIndex found the picture in the window as well: the click was on the
-        // favourites tab, and that is the whole question.
-        _steppingFavorites = true;
-        SetPinned(fileName);
-        UpdateMenuState();
         return true;
     }
 
@@ -967,50 +1262,47 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Title and source link of the pinned picture, read back from favorites.txt.
+    /// Title and source link of the wallpaper on the desktop, read back from
+    /// favorites.txt for the case where the eight day list cannot supply them.
     ///
     /// <para>
     /// This is a third reader of that file, and the only one outside the picker - so
-    /// it is fenced in. It runs when the pin is set, *and* the picture is not in the
-    /// current eight day list, *and* a file of that name is in favorites\: three
-    /// conditions that are rarely all true at once, and none of which opens the file
-    /// to be answered. Without them this would be an unconditional file read on the
-    /// startup path, which is exactly what the favourites are designed not to need.
+    /// it is fenced in. It runs only when there is a wallpaper *and* it is not in the
+    /// current eight day list, and then at most once per picture, because the answer
+    /// is cached against the file name it was read for while UpdateMenuState runs on
+    /// every refresh and every busy flip.
     /// </para>
     /// <para>
-    /// Cached against the file name it was read for, because UpdateMenuState runs on
-    /// every refresh and every menu change while the pin only moves when the user
-    /// moves it.
+    /// It used to be fenced in harder still, by the pin: keyed on
+    /// <see cref="AppConfig.PinnedWallpaper"/> and gated on the stepping list pointing
+    /// at favorites\. The rotation broke both premises - it runs with no pin set at
+    /// all - and every favourite it put up lost its title. Asking about the applied
+    /// picture instead covers the pin as well, since a locked picture out of the
+    /// window is an applied picture out of the window. The gate it drops was worth one
+    /// read of a few kilobytes, once, for a locked picture that is not a favourite.
     /// </para>
     /// </summary>
-    /// <param name="inFavorites">
-    /// <see cref="InFavoriteMode"/>, already answered by the caller. Passed in rather
-    /// than asked again so that one menu update probes the folder once.
-    /// </param>
-    private void EnsurePinnedMetadata(bool inFavorites)
+    private void EnsureAppliedMetadata()
     {
-        string fileName = _config.PinnedWallpaper;
-        if (!inFavorites || _currentIndex >= 0)
+        // Empty whenever the list can answer for itself, which is also what clears a
+        // stale title when the wallpaper moves back into the window.
+        string fileName = _currentIndex < 0 && _appliedPath is not null
+            ? Path.GetFileName(_appliedPath)
+            : string.Empty;
+
+        if (string.Equals(_appliedMetadataFor, fileName, StringComparison.OrdinalIgnoreCase))
         {
-            _pinnedMetadataFor = string.Empty;
-            _pinnedTitle = null;
-            _pinnedLink = null;
             return;
         }
 
-        if (string.Equals(_pinnedMetadataFor, fileName, StringComparison.OrdinalIgnoreCase))
+        _appliedMetadataFor = fileName;
+        _appliedTitle = null;
+        _appliedLink = null;
+        if (fileName.Length != 0 && Favorites.TryGetMetadata(fileName, out string title, out string link))
         {
-            return;
-        }
-
-        _pinnedMetadataFor = fileName;
-        _pinnedTitle = null;
-        _pinnedLink = null;
-        if (Favorites.TryGetMetadata(fileName, out string title, out string link))
-        {
-            _pinnedTitle = title;
-            _pinnedLink = link;
-            Logger.Debug("pin: title recovered from the favourites file=" + fileName);
+            _appliedTitle = title;
+            _appliedLink = link;
+            Logger.Debug("wallpaper: title recovered from the favourites file=" + fileName);
         }
     }
 
@@ -1019,13 +1311,14 @@ internal sealed class TrayContext : ApplicationContext
     /// otherwise whatever the favourites file remembered about the pinned picture.
     /// </summary>
     private string? CurrentCopyrightLink
-        => string.IsNullOrWhiteSpace(_appliedImage?.CopyrightLink) ? _pinnedLink : _appliedImage!.CopyrightLink;
+        => string.IsNullOrWhiteSpace(_appliedImage?.CopyrightLink) ? _appliedLink : _appliedImage!.CopyrightLink;
 
     private void UpdateMenuState()
     {
         bool pinned = _config.IsPinned;
+        bool shuffling = _config.Shuffle;
         bool inFavorites = InFavoriteMode;
-        EnsurePinnedMetadata(inFavorites);
+        EnsureAppliedMetadata();
 
         // The tooltip names the picture and nothing else: whether it is locked is
         // what the menu is for, and repeating it here only eats into the 63
@@ -1038,13 +1331,14 @@ internal sealed class TrayContext : ApplicationContext
             _titleItem.Text = EscapeMnemonic(Truncate(line, MenuTitleLength));
             _tray.Text = Truncate("必应壁纸 · " + _appliedImage.DisplayTitle, 63);
         }
-        else if (pinned && _appliedPath is not null)
+        else if (_appliedPath is not null)
         {
-            // Locked long enough to have left the eight day window, so the file itself
-            // is all the metadata there is - unless the picture is a favourite, in
-            // which case its title was written down on the day it still had one.
-            // Described twice on purpose: the menu row brackets the date, the tooltip
-            // is the one place that stays silent about the lock.
+            // Out of the eight day window - locked there long enough, or drawn there
+            // by the rotation - so the file itself is all the metadata there is,
+            // unless the picture is a favourite, in which case its title was written
+            // down on the day it still had one. Described twice on purpose: the menu
+            // row brackets the date, the tooltip is the one place that stays silent
+            // about the lock.
             //
             // _appliedPath rather than the pinned file name: the two name the same
             // picture, and this is the one of them that already knows which folder it
@@ -1054,7 +1348,7 @@ internal sealed class TrayContext : ApplicationContext
             // and a name with no date in it costs a stat to describe - twice would be
             // twice.
             Favorites.DescribeFile(_appliedPath, out string date, out string named);
-            bool remembered = !string.IsNullOrEmpty(_pinnedTitle);
+            bool remembered = !string.IsNullOrEmpty(_appliedTitle);
 
             // A caption taken from the file name says nothing once it is cut: the
             // half of "Space_91_OBGA.AdobeStock_4803068…" that survives is not a
@@ -1064,7 +1358,7 @@ internal sealed class TrayContext : ApplicationContext
             // tooltip, which is wider. A title favorites.txt remembered is words
             // someone wrote, and is truncated like any other title; a name that fits
             // is shown whole either way.
-            string line = DescribeWallpaper(date, remembered ? _pinnedTitle! : named, locked: true);
+            string line = DescribeWallpaper(date, remembered ? _appliedTitle! : named, locked: true);
             if (!remembered && date.Length != 0 && line.Length > MenuTitleLength)
             {
                 line = DescribeWallpaper(date, string.Empty, locked: true);
@@ -1072,7 +1366,7 @@ internal sealed class TrayContext : ApplicationContext
 
             _titleItem.Text = EscapeMnemonic(Truncate(line, MenuTitleLength));
             _tray.Text = Truncate(
-                "必应壁纸 · " + (remembered ? _pinnedTitle! : DescribeWallpaper(date, named, locked: false)),
+                "必应壁纸 · " + (remembered ? _appliedTitle! : DescribeWallpaper(date, named, locked: false)),
                 63);
         }
         else if (!_busy)
@@ -1089,7 +1383,16 @@ internal sealed class TrayContext : ApplicationContext
         // currently says something else, means the row is just a caption.
         _titleItem.Enabled = !_busy && !string.IsNullOrWhiteSpace(CurrentCopyrightLink);
 
-        if (inFavorites)
+        if (shuffling)
+        {
+            // The one list whose ends can be drawn rather than discovered by clicking:
+            // the play position is a field, so no folder has to be read to answer this.
+            // Forward never ends - the last picture of a round is followed by another
+            // shuffle - while backwards stops at the start of the round.
+            _newerItem.Enabled = !_busy;
+            _olderItem.Enabled = !_busy && _playlist.HasPrevious;
+        }
+        else if (inFavorites)
         {
             // Both rows stay live. Whether there is a neighbour is only knowable by
             // enumerating favorites\, and this method runs on every refresh and every
@@ -1108,6 +1411,9 @@ internal sealed class TrayContext : ApplicationContext
 
         _refreshItem.Enabled = !_busy;
         _pickerItem.Enabled = !_busy;
+
+        _shuffleItem.Checked = shuffling;
+        _shuffleItem.Enabled = !_busy;
 
         _pinItem.Checked = pinned;
         _pinItem.Enabled = !_busy && (pinned || _appliedPath is not null);
@@ -1198,6 +1504,23 @@ internal sealed class TrayContext : ApplicationContext
                 Logger.Debug("refresh: timer interval=" + _config.RefreshIntervalHours + "h");
                 break;
 
+            case SettingKind.Shuffle:
+                OnShuffleModeChanged();
+                break;
+
+            case SettingKind.ShuffleInterval:
+                // Restarted rather than left counting: the new interval should be
+                // measured from now, not from whenever the running one started.
+                _shuffleTimer.Stop();
+                _shuffleTimer.Interval = GetShuffleIntervalMilliseconds();
+                if (_config.Shuffle)
+                {
+                    _shuffleTimer.Start();
+                }
+
+                Logger.Debug("shuffle: timer interval=" + _config.ShuffleIntervalMinutes + "m");
+                break;
+
             case SettingKind.KeepDays:
                 WallpaperService.Cleanup(Paths.WallpaperDirectory, _config.KeepDays, BuildProtectedFiles());
                 break;
@@ -1264,6 +1587,15 @@ internal sealed class TrayContext : ApplicationContext
         return hours * 60 * 60 * 1000;
     }
 
+    private int GetShuffleIntervalMilliseconds()
+    {
+        int minutes = AppConfig.Clamp(
+            _config.ShuffleIntervalMinutes,
+            AppConfig.MinShuffleIntervalMinutes,
+            AppConfig.MaxShuffleIntervalMinutes);
+        return minutes * 60 * 1000;
+    }
+
     /// <summary>
     /// Menu caption for a picture whose metadata is out of reach: date first, then
     /// whatever else there is to call it.
@@ -1323,6 +1655,7 @@ internal sealed class TrayContext : ApplicationContext
         _newerItem,
         _pickerItem,
         _refreshItem,
+        _shuffleItem,
         _pinItem,
         new MenuItem("-"),
         _folderItem,

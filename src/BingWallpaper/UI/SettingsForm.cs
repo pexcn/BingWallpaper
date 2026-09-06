@@ -12,6 +12,8 @@ internal enum SettingKind
     Fit,
     Theme,
     Interval,
+    Shuffle,
+    ShuffleInterval,
     KeepDays,
     RunAtStartup,
 }
@@ -67,6 +69,8 @@ internal sealed class SettingsForm : Form
     private readonly ThemedRadioButton _themeLight = new("浅色");
     private readonly ThemedRadioButton _themeDark = new("深色");
     private readonly ThemedComboBox _intervalBox = new();
+    private readonly ThemedCheckBox _shuffleBox = new(string.Empty);
+    private readonly ThemedComboBox _shuffleIntervalBox = new();
     private readonly ThemedComboBox _keepDaysBox = new();
     // No caption: the row label carries it, like every other setting.
     private readonly ThemedCheckBox _startupBox = new(string.Empty);
@@ -206,7 +210,7 @@ internal sealed class SettingsForm : Form
     /// </summary>
     private void SizeDropDowns()
     {
-        ComboBox[] boxes = { _marketBox, _fitBox, _intervalBox, _keepDaysBox };
+        ComboBox[] boxes = { _marketBox, _fitBox, _intervalBox, _shuffleIntervalBox, _keepDaysBox };
         int textWidth = 0;
 
         foreach (ComboBox box in boxes)
@@ -284,6 +288,17 @@ internal sealed class SettingsForm : Form
         }
 
         AddRow(fields, "检查间隔", _intervalBox);
+
+        // Next to the check interval rather than further down: both rows answer the
+        // same question, which is how often the desktop changes.
+        AddRow(fields, "随机轮播", _shuffleBox);
+
+        foreach (int minutes in new[] { 1, 3, 5, 10, 15, 30, 60 })
+        {
+            _shuffleIntervalBox.Items.Add(new Choice(minutes, FormatMinutes(minutes)));
+        }
+
+        AddRow(fields, "轮播间隔", _shuffleIntervalBox);
 
         foreach (int days in new[] { 0, 7, 14, 30, 60, 90, 180, 365 })
         {
@@ -414,6 +429,8 @@ internal sealed class SettingsForm : Form
 
     private static string FormatHours(int hours) => hours + " 小时";
 
+    private static string FormatMinutes(int minutes) => minutes + " 分钟";
+
     private static string FormatDays(int days) => days == 0 ? "永久" : days + " 天";
 
     /// <summary>
@@ -472,6 +489,15 @@ internal sealed class SettingsForm : Form
                     AppConfig.MinRefreshIntervalHours,
                     AppConfig.MaxRefreshIntervalHours),
                 FormatHours);
+            _shuffleBox.Checked = _config.Shuffle;
+            _shuffleIntervalBox.Enabled = _config.Shuffle;
+            SelectValue(
+                _shuffleIntervalBox,
+                AppConfig.Clamp(
+                    _config.ShuffleIntervalMinutes,
+                    AppConfig.MinShuffleIntervalMinutes,
+                    AppConfig.MaxShuffleIntervalMinutes),
+                FormatMinutes);
             SelectValue(
                 _keepDaysBox,
                 AppConfig.Clamp(_config.KeepDays, 0, AppConfig.MaxKeepDays),
@@ -518,6 +544,34 @@ internal sealed class SettingsForm : Form
 
             _config.RefreshIntervalHours = hours;
             PersistDeferred(SettingKind.Interval);
+        };
+
+        _shuffleBox.CheckedChanged += (_, _) =>
+        {
+            // Tracks the box rather than the saved value, so the interval row greys
+            // out with the click instead of one save later - and stays right even
+            // when the save below fails.
+            _shuffleIntervalBox.Enabled = _shuffleBox.Checked;
+
+            if (_loading || _config.Shuffle == _shuffleBox.Checked)
+            {
+                return;
+            }
+
+            _config.Shuffle = _shuffleBox.Checked;
+            Persist(SettingKind.Shuffle);
+        };
+
+        _shuffleIntervalBox.SelectedIndexChanged += (_, _) =>
+        {
+            int minutes = GetValue(_shuffleIntervalBox, _config.ShuffleIntervalMinutes);
+            if (_loading || _config.ShuffleIntervalMinutes == minutes)
+            {
+                return;
+            }
+
+            _config.ShuffleIntervalMinutes = minutes;
+            PersistDeferred(SettingKind.ShuffleInterval);
         };
 
         _keepDaysBox.SelectedIndexChanged += (_, _) =>
