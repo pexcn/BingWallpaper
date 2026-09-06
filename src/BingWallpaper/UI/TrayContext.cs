@@ -797,9 +797,10 @@ internal sealed class TrayContext : ApplicationContext
         if (value.Length == 0)
         {
             // Released, so the wallpaper is back under the timer - and the timer's
-            // list is the window. Cleared here rather than left to the apply that
-            // follows, because UpdateMenuState below would otherwise draw one menu
-            // against a folder the pin no longer names.
+            // list is the window, not favorites\. Nothing downstream will do this:
+            // releasing applies nothing now, so left to the next apply the two step
+            // rows would go on walking a folder the pin no longer names - and
+            // UpdateMenuState below would already have drawn them that way.
             _steppingFavorites = false;
         }
 
@@ -824,31 +825,32 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Lifts the lock and hands the desktop back to the refresh timer. Public for the
-    /// picker's context menu, which needs this direction only: the row is offered on
-    /// the locked tile alone, so there is nothing there to toggle.
+    /// Lifts the lock and hands the desktop back to the refresh timer, leaving the
+    /// picture where it is. Public for the picker's context menu, which needs this
+    /// direction only: the row is offered on the locked tile alone, so there is
+    /// nothing there to toggle.
+    ///
+    /// <para>
+    /// Deliberately not <see cref="ReturnToDailyWallpaper"/>, which is what this used
+    /// to end with. Locking is a pure state change - <see cref="TogglePin"/> only
+    /// writes down the file name that is already on the desktop - so releasing has to
+    /// be one as well, or the same switch is destructive in one direction only: a
+    /// picture taken out of favorites\ would be gone the moment the user stops holding
+    /// it, with no way back to it but the picker. Nothing has to be wound up here
+    /// either, unlike the rotation: the refresh timer has been running all along, its
+    /// passes reconciling the lock instead of applying (see
+    /// <see cref="EnsurePinnedAsync"/>), so the next tick takes the desktop to today's
+    /// picture on the schedule it was already keeping.
+    /// </para>
     /// </summary>
-    public void ReleasePin()
-    {
-        if (!_config.IsPinned)
-        {
-            return;
-        }
-
-        SetPinned(null);
-        if (_config.IsPinned)
-        {
-            // The save failed, nothing was released.
-            return;
-        }
-
-        ReturnToDailyWallpaper();
-    }
+    public void ReleasePin() => SetPinned(null);
 
     /// <summary>
-    /// Hands the desktop back to the refresh timer. Both of the other two modes end
-    /// here, because both are the same thing to leave: something that was deciding
-    /// the wallpaper has stopped, and today's picture is what that falls back to.
+    /// Puts today's picture up now and restarts the refresh timer around it. How the
+    /// rotation ends, and only the rotation: it was changing the wallpaper on a clock
+    /// of its own, so switching it off has to land somewhere, and today's picture is
+    /// that landing. A lock is the opposite - it was holding the desktop still - so
+    /// releasing one changes nothing on screen (see <see cref="ReleasePin"/>).
     /// </summary>
     private void ReturnToDailyWallpaper()
     {
@@ -862,9 +864,9 @@ internal sealed class TrayContext : ApplicationContext
         {
             // The list already names today's picture, so fetching it again could only
             // return the same entry. Applying it straight from the cache keeps this
-            // off the network entirely. Skipping the refresh also skips its cleanup
-            // pass, which is what would drop the file that just lost its protection -
-            // the next cycle does that.
+            // off the network entirely, cleanup pass included - that one is not urgent
+            // here (the rotation's pictures live in favorites\, which retention does
+            // not touch) and the next cycle runs it anyway.
             _ = MoveToAsync(0, pinAfterwards: false);
             return;
         }

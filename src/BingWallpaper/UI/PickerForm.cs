@@ -1036,10 +1036,10 @@ internal sealed class PickerForm : Form
     }
 
     /// <summary>
-    /// Lifts the lock from the picture on the desktop. That picture is on its way out
-    /// - releasing hands the desktop back to the refresh timer, which puts today's up
-    /// - so the status line says what happened rather than leaving the badge to
-    /// vanish on its own.
+    /// Lifts the lock from the picture on the desktop. The picture stays up until the
+    /// refresh timer next comes round, so all this changes on the tile is a padlock
+    /// turning into a tick - too quiet to read as a result, which is what the status
+    /// line is for.
     /// </summary>
     private void Unpin()
     {
@@ -1049,7 +1049,7 @@ internal sealed class PickerForm : Form
         // this one only says what did not happen.
         SetTransientStatus(_context.IsPinned
             ? "取消锁定失败，壁纸仍处于锁定状态。"
-            : "已取消锁定，壁纸恢复每日更新。");
+            : "已取消锁定，当前壁纸保留至下次刷新。");
     }
 
     private void Unfavorite(string fileName)
