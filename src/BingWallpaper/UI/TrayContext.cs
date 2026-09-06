@@ -811,14 +811,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (_config.IsPinned)
         {
-            SetPinned(null);
-            if (_config.IsPinned)
-            {
-                // The save failed, nothing was released.
-                return;
-            }
-
-            ReturnToDailyWallpaper();
+            ReleasePin();
             return;
         }
 
@@ -828,6 +821,28 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         SetPinned(Path.GetFileName(_appliedPath));
+    }
+
+    /// <summary>
+    /// Lifts the lock and hands the desktop back to the refresh timer. Public for the
+    /// picker's context menu, which needs this direction only: the row is offered on
+    /// the locked tile alone, so there is nothing there to toggle.
+    /// </summary>
+    public void ReleasePin()
+    {
+        if (!_config.IsPinned)
+        {
+            return;
+        }
+
+        SetPinned(null);
+        if (_config.IsPinned)
+        {
+            // The save failed, nothing was released.
+            return;
+        }
+
+        ReturnToDailyWallpaper();
     }
 
     /// <summary>

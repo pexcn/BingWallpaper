@@ -884,14 +884,39 @@ internal sealed class PickerForm : Form
             Enabled = !string.IsNullOrWhiteSpace(image.CopyrightLink),
         };
 
-        return new ContextMenu(new[]
+        List<MenuItem> items = new List<MenuItem>(4)
         {
             // Bold, the way the shell marks a menu's default action: this row and a
             // click on the tile are the same command, and the emphasis is what says so.
             new MenuItem("设为壁纸并锁定", (_, _) => StartApplyRecent(index)) { DefaultItem = true },
-            favorite,
-            link,
-        });
+        };
+
+        AddUnpinItem(items, fileName);
+        items.Add(favorite);
+        items.Add(link);
+        return new ContextMenu(items.ToArray());
+    }
+
+    /// <summary>
+    /// Adds the row that lifts the lock, and only on the tile that carries it: the
+    /// lock holds one file name, and the picture on the desktop is the only one it
+    /// can be.
+    ///
+    /// <para>
+    /// Right under the apply row it undoes, and never the default item - bold marks
+    /// what a click on the tile does, and that is still "apply and lock". Greyed out
+    /// while a pass owns the program, like the tray's own locked row: the two switch
+    /// the same thing and must not disagree about whether it can be switched.
+    /// </para>
+    /// </summary>
+    private void AddUnpinItem(List<MenuItem> items, string fileName)
+    {
+        if (GetMark(fileName) != TileMark.Pinned)
+        {
+            return;
+        }
+
+        items.Add(new MenuItem("取消锁定", (_, _) => Unpin()) { Enabled = !_context.IsBusy });
     }
 
     /// <summary>
@@ -912,11 +937,13 @@ internal sealed class PickerForm : Form
         FavoriteItem item = _favoriteItems[index];
         string path = Path.Combine(Paths.FavoritesDirectory, item.FileName);
 
-        List<MenuItem> items = new List<MenuItem>(5)
+        List<MenuItem> items = new List<MenuItem>(6)
         {
             new MenuItem("设为壁纸并锁定", (_, _) => StartApplyFavorite(index)) { DefaultItem = true },
-            new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)),
         };
+
+        AddUnpinItem(items, item.FileName);
+        items.Add(new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)));
 
         if (item.IsBingImage)
         {
@@ -1006,6 +1033,23 @@ internal sealed class PickerForm : Form
         {
             _busy = false;
         }
+    }
+
+    /// <summary>
+    /// Lifts the lock from the picture on the desktop. That picture is on its way out
+    /// - releasing hands the desktop back to the refresh timer, which puts today's up
+    /// - so the status line says what happened rather than leaving the badge to
+    /// vanish on its own.
+    /// </summary>
+    private void Unpin()
+    {
+        _context.ReleasePin();
+
+        // A save that failed has already put up a dialog of its own saying why, so
+        // this one only says what did not happen.
+        SetTransientStatus(_context.IsPinned
+            ? "取消锁定失败，壁纸仍处于锁定状态。"
+            : "已取消锁定，壁纸恢复每日更新。");
     }
 
     private void Unfavorite(string fileName)
