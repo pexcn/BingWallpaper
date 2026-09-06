@@ -10,7 +10,7 @@ namespace BingWallpaper;
 ///
 /// <para>
 /// The history window is built fresh on every open and disposed when it closes, so
-/// nothing it owns outlives it - and downloading eight pictures again to show a list
+/// nothing it owns outlives it - and downloading fifteen pictures again to show a list
 /// the user was just looking at is a poor trade. The bytes live one step above the
 /// window instead. Bytes, not bitmaps: a 400x240 JPEG is a few tens of KB, where the
 /// decoded bitmap a tile paints from is 400 * 240 * 4 bytes, so this is both the
@@ -18,9 +18,9 @@ namespace BingWallpaper;
 /// </para>
 /// <para>
 /// Not a general purpose cache. It holds the thumbnails of whichever image list is
-/// current and nothing else, which is what bounds it to eight entries without an
+/// current and nothing else, which is what bounds it to fifteen entries without an
 /// eviction policy, a size cap or a clock - a tray process that runs for weeks would
-/// otherwise collect eight more of these every daily refresh.
+/// otherwise collect fifteen more of these every daily refresh.
 /// </para>
 /// <para>
 /// Everything here runs on the UI thread: the history window awaits its downloads

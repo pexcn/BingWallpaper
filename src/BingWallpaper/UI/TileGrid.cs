@@ -53,8 +53,8 @@ internal readonly struct TileInfo
 }
 
 /// <summary>
-/// What a <see cref="TileGrid"/> paints. One grid, two implementations: the last
-/// eight days come off the network, the favourites off the disk cache.
+/// What a <see cref="TileGrid"/> paints. One grid, two implementations: the recent days
+/// come off the network, the favourites off the disk cache.
 /// </summary>
 internal interface ITileSource
 {

@@ -487,7 +487,7 @@ internal static class Favorites
     /// Written to a .tmp and renamed rather than over the top of the old file:
     /// WriteAllText truncates first, so a crash between the truncate and the last byte
     /// leaves an empty or half written file with the old content already gone. The
-    /// window is a millisecond wide, but a title that is past Bing's eight day window
+    /// window is a millisecond wide, but a title that is past Bing's recent window
     /// cannot be fetched again - and the protection is three lines we already own.
     /// </para>
     /// </summary>

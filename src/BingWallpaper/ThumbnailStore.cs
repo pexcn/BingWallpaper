@@ -16,10 +16,9 @@ namespace BingWallpaper;
 ///
 /// <para>
 /// Not to be confused with <see cref="ThumbnailCache"/>, which holds the small JPEGs
-/// Bing serves for the last eight days. Nothing here comes off the network: a
-/// favourite may be years old, so its thumbnail can only be made from the picture on
-/// disk - and making one means decoding a UHD JPEG, which is the reason for
-/// everything below.
+/// Bing still serves. Nothing here comes off the network: a favourite may be years
+/// old, so its thumbnail can only be made from the picture on disk - and making one
+/// means decoding a UHD JPEG, which is the reason for everything below.
 /// </para>
 /// <para>
 /// One worker, not a pool. The first pass over a picture allocates GDI+'s full size

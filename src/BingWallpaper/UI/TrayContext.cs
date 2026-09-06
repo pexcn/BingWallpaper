@@ -268,7 +268,7 @@ internal sealed class TrayContext : ApplicationContext
         }));
     }
 
-    /// <summary>Metadata of the last 8 days, newest first.</summary>
+    /// <summary>Metadata of the days Bing still serves, newest first.</summary>
     public IReadOnlyList<BingImageInfo> Images => _images;
 
     public AppConfig Config => _config;
@@ -284,7 +284,7 @@ internal sealed class TrayContext : ApplicationContext
     /// <summary>
     /// File name of the wallpaper this program last applied, or null. The picker
     /// badges a tile by it: the index into <see cref="Images"/> cannot answer for a
-    /// favourite that left the eight day window years ago.
+    /// favourite that left the recent window years ago.
     /// </summary>
     public string? AppliedFileName => _appliedPath is null ? null : Path.GetFileName(_appliedPath);
 
@@ -317,7 +317,7 @@ internal sealed class TrayContext : ApplicationContext
 
     /// <summary>
     /// The one place the current list is replaced. The thumbnail cache is trimmed to
-    /// it here rather than at each call site, so it cannot start collecting eight more
+    /// it here rather than at each call site, so it cannot start collecting fifteen more
     /// entries a day the moment someone adds a third way to set the list.
     /// </summary>
     private void SetImages(List<BingImageInfo> images)
@@ -580,7 +580,7 @@ internal sealed class TrayContext : ApplicationContext
         {
             Logger.Info("refresh: start userinitiated=" + userInitiated);
             List<BingImageInfo> images = await _client
-                .FetchAsync(_config.Market, 0, BingClient.MaxImageCount, _shutdown.Token)
+                .FetchWindowAsync(_config.Market, _shutdown.Token)
                 .ConfigureAwait(true);
 
             SetImages(images);
@@ -652,9 +652,8 @@ internal sealed class TrayContext : ApplicationContext
         // Which list to step through was decided by a click in a session that is over,
         // and it is deliberately not written to the INI: the folder is the only clue
         // left here, and a good enough one. The case it cannot tell apart - a
-        // favourite that is also still in the eight day window - needs the pin to be
-        // younger than eight days, while a lock that survived a restart has usually
-        // long left it.
+        // favourite that is also still in the recent window - needs the pin to be younger
+        // than that window, while a lock that survived a restart has usually long left it.
         _steppingFavorites = Favorites.Contains(_config.PinnedWallpaper);
 
         string path = Paths.ResolveWallpaperFile(_config.PinnedWallpaper);
@@ -683,7 +682,7 @@ internal sealed class TrayContext : ApplicationContext
     /// <summary>
     /// Reconciles the pin with the metadata that was just fetched, without touching
     /// the desktop unless it has to. Three cases: the picture is still inside the
-    /// eight day window and keeps its title; it has aged out and lives on as a file
+    /// recent window and keeps its title; it has aged out and lives on as a file
     /// with no metadata left; or the file is gone and has to be fetched again - or
     /// given up on, when it is out of the window as well.
     /// </summary>
@@ -921,7 +920,7 @@ internal sealed class TrayContext : ApplicationContext
         {
             // Asked before InFavoriteMode and not through it: the rotation runs with
             // no pin set, which is the very thing InFavoriteMode reads, so both rows
-            // would otherwise fall through to the eight day window.
+            // would otherwise fall through to the recent window.
             //
             // A negative delta is "下一张", which walks the list towards the newer
             // end. A shuffled round has no newer or older, only a play position, and
@@ -1316,7 +1315,7 @@ internal sealed class TrayContext : ApplicationContext
     ///
     /// <para>
     /// Pinned rather than merely applied, and for a stronger reason than picking a day
-    /// out of the eight day window: a favourite is usually *outside* that window, so
+    /// out of the recent window: a favourite is usually *outside* that window, so
     /// without the pin the next refresh would put today's picture back an hour later
     /// and the choice would look like it had been ignored.
     /// </para>
@@ -1451,12 +1450,12 @@ internal sealed class TrayContext : ApplicationContext
 
     /// <summary>
     /// Title and source link of the wallpaper on the desktop, read back from
-    /// favorites.txt for the case where the eight day list cannot supply them.
+    /// favorites.txt for the case where the recent list cannot supply them.
     ///
     /// <para>
     /// This is a third reader of that file, and the only one outside the picker - so
     /// it is fenced in. It runs only when there is a wallpaper *and* it is not in the
-    /// current eight day list, and then at most once per picture, because the answer
+    /// current list, and then at most once per picture, because the answer
     /// is cached against the file name it was read for while UpdateMenuState runs on
     /// every refresh and every busy flip.
     /// </para>
@@ -1521,7 +1520,7 @@ internal sealed class TrayContext : ApplicationContext
         }
         else if (_appliedPath is not null)
         {
-            // Out of the eight day window - locked there long enough, or drawn there
+            // Out of the recent window - locked there long enough, or drawn there
             // by the rotation - so the file itself is all the metadata there is,
             // unless the picture is a favourite, in which case its title was written
             // down on the day it still had one. Described twice on purpose: the menu

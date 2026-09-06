@@ -20,7 +20,7 @@ internal sealed class BingImageInfo
 
     /// <summary>
     /// What some markets put in "title" instead of a title - en-AU and en-NZ answer
-    /// with it for every entry of the eight day window. Treated as absent rather than
+    /// with it for every entry of the recent window. Treated as absent rather than
     /// shown, otherwise the tray menu reads "2026-08-26 · Info".
     /// </summary>
     private const string PlaceholderTitle = "Info";
@@ -79,7 +79,7 @@ internal sealed class BingImageInfo
 
     /// <summary>
     /// The inverse of <see cref="GetFileName"/>. Needed when a picture has aged out
-    /// of the eight day window and its file name is the only metadata left: the id
+    /// of the recent window and its file name is the only metadata left: the id
     /// never contains an underscore (see <see cref="Sanitize"/>), so the three
     /// segments can always be told apart again.
     /// </summary>
@@ -168,7 +168,7 @@ internal sealed class BingImageInfo
 
     /// <summary>
     /// Formats a yyyyMMdd token for display. Static because a pinned picture that
-    /// has left the eight day window has a date but no <see cref="BingImageInfo"/>
+    /// has left the recent window has a date but no <see cref="BingImageInfo"/>
     /// to hang it on.
     /// </summary>
     public static string FormatDate(string startDate)

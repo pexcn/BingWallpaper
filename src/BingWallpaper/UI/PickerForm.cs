@@ -13,7 +13,8 @@ using BingWallpaper.Theme;
 namespace BingWallpaper.UI;
 
 /// <summary>
-/// The wallpaper picker: the last eight days on one tab, the favourites on the other.
+/// The wallpaper picker: the days Bing still serves on one tab, the favourites on the
+/// other.
 ///
 /// <para>
 /// Both tabs are the same <see cref="TileGrid"/> with a different source behind it -
@@ -29,19 +30,23 @@ namespace BingWallpaper.UI;
 /// No WS_EX_COMPOSITED, which this window used to carry - and it must not come back.
 /// That style composes the window and its children off screen and puts the result up
 /// in one piece; its price is a slow scroll, which the old window never paid because,
-/// sized to the whole eight day grid, it never scrolled. The favourites tab does, and
-/// then the price is real: the view updates visibly late under the wheel and the
-/// window can spin in WM_PAINT. Both flickers it was there for are gone by other
-/// means - the grid is one double buffered control instead of a panel filling up with
-/// tiles, and the status bar below draws itself the same way.
+/// sized to the whole eight day grid, it never scrolled. Both tabs do now - the recent
+/// one since the list grew past what the window shows - and then the price is real:
+/// the view updates visibly late under the wheel and the window can spin in WM_PAINT.
+/// Both flickers it was there for are gone by other means - the grid is one double
+/// buffered control instead of a panel filling up with tiles, and the status bar below
+/// draws itself the same way.
 /// </para>
 /// </summary>
 internal sealed class PickerForm : Form
 {
     /// <summary>
-    /// The window opens on exactly this grid. Bing serves at most 8 days, so 4x2 shows
-    /// all of them at once with no gap in the last row. It is the initial size only -
-    /// the favourites tab is free to be resized.
+    /// The window opens on exactly this grid; both tabs scroll for whatever does not
+    /// fit. Kept at 4x2 now that the recent tab holds fifteen days rather than the
+    /// eight a single response carries: growing the window with the list would cost
+    /// height on every open - four rows stop fitting a 1080p screen as soon as the
+    /// display is scaled, and would stand half empty on the day the tail page fails
+    /// and only page one arrives - while scrolling costs nothing until it is used.
     /// </summary>
     private const int Columns = 4;
 
@@ -121,8 +126,8 @@ internal sealed class PickerForm : Form
         ShowInTaskbar = true;
 
         // Fixed, as before: the window is exactly one grid wide, and resizing it could
-        // only add empty space around the tiles. The favourites tab scrolls instead -
-        // which is also why WS_EX_COMPOSITED is gone, see the class comment.
+        // only add empty space around the tiles. Both tabs scroll instead - which is
+        // also why WS_EX_COMPOSITED is gone, see the class comment.
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         KeyPreview = true;
@@ -220,10 +225,10 @@ internal sealed class PickerForm : Form
     private void FitToGrid()
     {
         // Room for a scroll bar on top of the four columns, whether one is showing or
-        // not. Without it the favourites tab would lose a column to the bar the moment
-        // it needs one - the window is a whole number of columns wide with nothing to
-        // spare - and three columns in a window built for four looks like a bug. The
-        // grid centres its content, so the spare width reads as margin either way.
+        // not. Without it a tab would lose a column to the bar the moment it needs one -
+        // the window is a whole number of columns wide with nothing to spare - and three
+        // columns in a window built for four looks like a bug. The grid centres its
+        // content, so the spare width reads as margin either way.
         int width = (TileGrid.CellWidth * Columns)
             + (TileGrid.EdgePadding * 2)
             + SystemInformation.VerticalScrollBarWidth;
@@ -274,7 +279,7 @@ internal sealed class PickerForm : Form
     {
         if (images.Count == 0)
         {
-            SetStatus("正在获取最近 8 天的壁纸信息…");
+            SetStatus("正在获取最近的壁纸信息…");
             _ = FetchAsync();
             return;
         }
@@ -305,7 +310,7 @@ internal sealed class PickerForm : Form
         try
         {
             List<BingImageInfo> images = await _context.Client
-                .FetchAsync(_context.Config.Market, 0, BingClient.MaxImageCount, _context.ShutdownToken)
+                .FetchWindowAsync(_context.Config.Market, _context.ShutdownToken)
                 .ConfigureAwait(true);
 
             // Keep the tray menu and this window on the same list, otherwise the
@@ -337,7 +342,7 @@ internal sealed class PickerForm : Form
     /// <summary>
     /// Identifies what the recent tab is currently showing, so re-opening the window
     /// does not re-download every thumbnail. Dates alone are not enough: two markets
-    /// serve the same eight days with different photos and different titles, and a
+    /// serve the same days with different photos and different titles, and a
     /// signature built from the range only would call that unchanged and leave the old
     /// market on screen.
     /// </summary>
@@ -610,7 +615,7 @@ internal sealed class PickerForm : Form
         }
 
         SetStatus(_images.Count == 0
-            ? "正在获取最近 8 天的壁纸信息…"
+            ? "正在获取最近的壁纸信息…"
             : "共 " + _images.Count.ToString(CultureInfo.InvariantCulture) + " 天，点击任意一张即可设为壁纸并锁定。");
     }
 
@@ -1101,8 +1106,8 @@ internal sealed class PickerForm : Form
     }
 
     /// <summary>
-    /// The last eight days. The bitmaps come from the shared byte cache one step above
-    /// this window, so re-opening it does not re-download anything.
+    /// The days Bing still serves. The bitmaps come from the shared byte cache one step
+    /// above this window, so re-opening it does not re-download anything.
     /// </summary>
     private sealed class RecentTileSource : ITileSource, IDisposable
     {
@@ -1150,8 +1155,11 @@ internal sealed class PickerForm : Form
         }
 
         /// <summary>
-        /// Nothing to do: eight entries all fit on screen, and their thumbnails are a
-        /// few tens of KB each. The window this interface exists for is the favourites'.
+        /// Nothing to do. The list is fifteen entries at most and a tile sized bitmap is
+        /// just under 100 KB at 100% DPI, so holding every one of them costs about
+        /// 1.4 MB whether it is on screen or not - and loading top down means the rows
+        /// below the fold are ready before the wheel gets there. The window this
+        /// interface exists for is the favourites', where the list has no upper bound.
         /// </summary>
         public void SetWindow(int first, int count)
         {

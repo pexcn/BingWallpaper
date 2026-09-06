@@ -19,8 +19,24 @@ namespace BingWallpaper;
 /// </summary>
 internal sealed class BingClient : IDisposable
 {
-    /// <summary>Bing only serves the last 8 days: idx 0..7, n max 8.</summary>
-    public const int MaxImageCount = 8;
+    /// <summary>One response carries at most 8 entries: n is clamped to 1..8.</summary>
+    private const int MaxImageCount = 8;
+
+    /// <summary>
+    /// The highest idx the endpoint honours. A response starts at "today - idx" and
+    /// walks back n days, so idx is what reaches past the 8 entries one response can
+    /// hold - up to a point: probed against zh-CN on 2026-09-06, idx 8 and idx 10 both
+    /// answered exactly what idx 7 did, so the offset saturates here and the archive
+    /// still on offer is idx 7 plus n 8, or 15 days.
+    ///
+    /// <para>
+    /// Undocumented, like the saturation itself, which is why
+    /// <see cref="FetchWindowAsync"/> reports the window it actually got instead of the
+    /// one this arithmetic promises, and falls back to a single page when the two stop
+    /// agreeing.
+    /// </para>
+    /// </summary>
+    private const int MaxIndex = 7;
 
     private const string ApiBase = "https://www.bing.com/HPImageArchive.aspx";
 
@@ -66,16 +82,112 @@ internal sealed class BingClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches image metadata. <paramref name="idx"/> must be 0..7 and
-    /// <paramref name="count"/> 1..8; both are clamped.
+    /// Fetches the whole archive Bing still serves - 15 days, not the 8 a single
+    /// response can carry: idx 0 and <see cref="MaxIndex"/> cover today down to
+    /// "today - 14" between them, overlapping by exactly one day.
+    ///
+    /// <para>
+    /// The two pages go out one after the other rather than together. The tail is worth
+    /// one extra round trip per refresh and nothing more: page one carries today's
+    /// picture, which is all a refresh needs to do its job, and a request whose only
+    /// reason to exist disappears when the first one throws should not have been
+    /// started.
+    /// </para>
+    /// <para>
+    /// A tail that fails is logged and dropped - the caller gets the 8 days of page one
+    /// and the desktop never notices. A tail that adds nothing is logged too: that is
+    /// what a Bing which stopped honouring idx would look like, and the merge collapses
+    /// the two identical pages back into the 8 day window this program lived on before.
+    /// </para>
     /// </summary>
-    public async Task<List<BingImageInfo>> FetchAsync(
+    public async Task<List<BingImageInfo>> FetchWindowAsync(
+        string market,
+        CancellationToken cancellationToken)
+    {
+        List<BingImageInfo> images = await FetchAsync(market, 0, MaxImageCount, cancellationToken)
+            .ConfigureAwait(false);
+
+        List<BingImageInfo> tail;
+        try
+        {
+            tail = await FetchAsync(market, MaxIndex, MaxImageCount, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutting down, not a page that failed - this one has to reach the caller.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("api: tail page failed, keeping the first page idx=" + MaxIndex + " error=" + ex.Message);
+            return images;
+        }
+
+        int added = MergeTail(images, tail);
+
+        Logger.Info(
+            "api: window images=" + images.Count +
+            " added=" + added +
+            " range=" + images[images.Count - 1].StartDate + ".." + images[0].StartDate);
+
+        if (added == 0)
+        {
+            Logger.Warn("api: tail page repeated the first one, idx may no longer be honoured idx=" + MaxIndex);
+        }
+
+        return images;
+    }
+
+    /// <summary>
+    /// Appends every entry of <paramref name="tail"/> that <paramref name="images"/>
+    /// does not already hold, and returns how many were added.
+    ///
+    /// <para>
+    /// Keyed by start date rather than concatenated: a tail repeats what page one
+    /// already said - one day of it by design, all eight of them if idx ever stops
+    /// working - and none of that may turn into a duplicate tile.
+    /// </para>
+    /// <para>
+    /// Nothing is sorted afterwards. Both pages arrive newest first, and the tail is
+    /// requested second, so its first day is either the last day of page one or, if
+    /// Bing rolled over between the two requests, one day newer than that - never
+    /// older. Appending whatever survives the dedupe therefore leaves the list
+    /// descending and without a hole in it either way.
+    /// </para>
+    /// </summary>
+    private static int MergeTail(List<BingImageInfo> images, List<BingImageInfo> tail)
+    {
+        HashSet<string> known = new HashSet<string>(StringComparer.Ordinal);
+        foreach (BingImageInfo image in images)
+        {
+            known.Add(image.StartDate);
+        }
+
+        int added = 0;
+        foreach (BingImageInfo image in tail)
+        {
+            if (known.Add(image.StartDate))
+            {
+                images.Add(image);
+                added++;
+            }
+        }
+
+        return added;
+    }
+
+    /// <summary>
+    /// Fetches one page of image metadata. <paramref name="idx"/> must be
+    /// 0..<see cref="MaxIndex"/> and <paramref name="count"/> 1..8; both are clamped.
+    /// </summary>
+    private async Task<List<BingImageInfo>> FetchAsync(
         string market,
         int idx,
         int count,
         CancellationToken cancellationToken)
     {
-        int safeIdx = Clamp(idx, 0, MaxImageCount - 1);
+        int safeIdx = Clamp(idx, 0, MaxIndex);
         int safeCount = Clamp(count, 1, MaxImageCount);
 
         // No ensearch=1. That flag forces the English channel, which makes setmkt
