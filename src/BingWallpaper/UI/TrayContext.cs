@@ -283,19 +283,6 @@ internal sealed class TrayContext : ApplicationContext
 
     public CancellationToken ShutdownToken => _shutdown.Token;
 
-    /// <summary>Called from the single instance listener thread.</summary>
-    public void RequestActivation()
-    {
-        try
-        {
-            _window.BeginInvoke(new Action(ShowSettings));
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn("settings: activating the window failed error=" + ex.Message);
-        }
-    }
-
     /// <summary>
     /// Shares metadata that the picker window fetched on its own, so both windows
     /// index into the same list.

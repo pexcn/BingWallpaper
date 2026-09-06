@@ -13,11 +13,8 @@ namespace BingWallpaper;
 internal static class Program
 {
     private const string SingleInstanceObject = "BingWallpaper.SingleInstance";
-    private const string ActivateObject = "BingWallpaper.Activate";
 
     private static Mutex? _instanceMutex;
-    private static EventWaitHandle? _activateEvent;
-    private static TrayContext? _trayContext;
 
     /// <summary>
     /// The program takes no command line arguments: everything it can be told is in
@@ -71,16 +68,26 @@ internal static class Program
 
         Logger.Initialize(Paths.LogFile);
 
+        // A second launch does nothing beyond saying so here. It used to signal the
+        // running instance to open its settings window, which left double clicking an
+        // icon meaning one thing on the tray - the picker - and another on the
+        // shortcut, with nothing on screen hinting at either. The tray icon is the way
+        // back into an instance that is already running.
+        //
+        // It still writes the environment line, whose dir= is how a stray second copy
+        // launched from another folder gives itself away, but the separator below stays
+        // out of its way: that one marks a run, and this process never became one.
+        if (!TryBecomePrimaryInstance())
+        {
+            LogEnvironment();
+            Logger.Info("startup: another instance is already running, exiting");
+            return 0;
+        }
+
         // The only decorative line in the log, and only because a process boundary is
         // what you look for first when a log spans several runs.
         Logger.Info("----------------------------------------------------------------");
         LogEnvironment();
-
-        if (!TryBecomePrimaryInstance())
-        {
-            Logger.Info("startup: another instance is primary, asked it to show settings");
-            return 0;
-        }
 
         try
         {
@@ -111,9 +118,7 @@ internal static class Program
 
             Paths.EnsureWallpaperDirectory();
 
-            _trayContext = new TrayContext(config);
-            StartActivationListener();
-            Application.Run(_trayContext);
+            Application.Run(new TrayContext(config));
             Logger.Info("shutdown: message loop finished");
             return 0;
         }
@@ -145,15 +150,10 @@ internal static class Program
                 if (!createdNew)
                 {
                     mutex.Dispose();
-                    SignalRunningInstance(prefix + ActivateObject);
                     return false;
                 }
 
                 _instanceMutex = mutex;
-                _activateEvent = new EventWaitHandle(
-                    false,
-                    EventResetMode.AutoReset,
-                    prefix + ActivateObject);
                 Logger.Debug("singleinstance: namespace=" + prefix.TrimEnd('\\'));
                 return true;
             }
@@ -170,67 +170,10 @@ internal static class Program
         return true;
     }
 
-    private static void SignalRunningInstance(string eventName)
-    {
-        try
-        {
-            EventWaitHandle? handle;
-            if (EventWaitHandle.TryOpenExisting(eventName, out handle) && handle is not null)
-            {
-                using (handle)
-                {
-                    handle.Set();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn("singleinstance: signalling the running instance failed error=" + ex.Message);
-        }
-    }
-
-    /// <summary>Waits for a second instance to ask for the settings window.</summary>
-    private static void StartActivationListener()
-    {
-        EventWaitHandle? handle = _activateEvent;
-        TrayContext? context = _trayContext;
-        if (handle is null || context is null)
-        {
-            return;
-        }
-
-        Thread thread = new Thread(() =>
-        {
-            while (true)
-            {
-                try
-                {
-                    handle.WaitOne();
-                    context.RequestActivation();
-                }
-                catch (ObjectDisposedException)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn("singleinstance: activation listener stopped error=" + ex.Message);
-                    return;
-                }
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "BingWallpaper.ActivationListener",
-        };
-        thread.Start();
-    }
-
     private static void ReleaseSingleInstance()
     {
         try
         {
-            _activateEvent?.Dispose();
             if (_instanceMutex is not null)
             {
                 _instanceMutex.ReleaseMutex();
