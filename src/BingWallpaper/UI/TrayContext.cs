@@ -1310,15 +1310,14 @@ internal sealed class TrayContext : ApplicationContext
     /// every change, and the stepping list is about which folder a click walks, which
     /// the rotation answers for itself.
     /// </para>
-    /// </summary>
     /// <para>
-    /// Holder of <see cref="_applyingFavorite"/> for all three of its callers, rather
-    /// than each of them raising it around this call. The picker is why: it applies a
-    /// favourite through the public wrapper above without going near the flag or
-    /// <see cref="_busy"/>, so a rotation tick landing inside the third of a second
-    /// that apply takes used to sail past both guards - and, having started later,
-    /// finish later, leaving the lock on the picture that was clicked and the desktop
-    /// on the one the rotation drew.
+    /// Holder of <see cref="_applyingFavorite"/> for all three routes that reach it,
+    /// rather than each of them raising it around the call. The picker is why: it
+    /// applies a favourite through the public wrapper above and went near neither the
+    /// flag nor <see cref="_busy"/>, so a rotation tick landing inside the third of a
+    /// second that apply takes sailed past both guards - and, having started later,
+    /// finished later, leaving the lock on the picture that was clicked and the
+    /// desktop on the one the rotation drew.
     /// </para>
     /// </summary>
     private async Task<bool> ApplyFavoriteCoreAsync(string fileName)
