@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -53,9 +54,16 @@ namespace BingWallpaper;
 /// </para>
 /// <para>
 /// A change that arrives while a fade is running is handed to that fade rather than
-/// starting a new one: see <see cref="RunAsync"/>. The alpha is the only thing that
-/// moves during it - the frame is uploaded once and DWM composes it, so a tick
-/// costs one byte rather than a full screen blend.
+/// starting a new one: see <see cref="RunAsync"/>. If the fade had already started,
+/// the cover first folds what is on screen into its own picture and goes opaque
+/// again, which changes not one pixel and lets the new wallpaper go up out of sight
+/// like every other one - so a click during a fade continues the transition rather
+/// than cutting through it.
+/// </para>
+/// <para>
+/// Between those moments the alpha is the only thing that moves: the frame is
+/// uploaded once and DWM composes it, so a tick costs one byte rather than a full
+/// screen blend. The blend happens once per change taken mid fade, never per frame.
 /// </para>
 /// <para>
 /// None of this is documented by Microsoft, so every step is allowed to fail: no
@@ -90,10 +98,10 @@ internal static class WallpaperTransition
 
     /// <summary>
     /// How long the fade itself takes. Windows fades a slideshow wallpaper in about a
-    /// second; this is a little quicker than that, which reads as deliberate rather
-    /// than as a machine that is thinking about it.
+    /// second; this is well short of that, because a wallpaper change here is the
+    /// answer to a click and a click wants an answer.
     /// </summary>
-    private const int FadeMilliseconds = 600;
+    private const int FadeMilliseconds = 500;
 
     /// <summary>
     /// Roughly 60 steps a second. The elapsed time drives the alpha, not the tick
@@ -126,9 +134,16 @@ internal static class WallpaperTransition
     private const int WM_FADE_CANCEL = NativeMethods.WM_APP + 2;
 
     /// <summary>
+    /// Posted to the cover to pause its fade and go opaque again without changing
+    /// what is on screen, so that a change can be applied out of sight. Answered, not
+    /// just posted: the caller has to know it happened before it applies anything.
+    /// </summary>
+    private const int WM_FADE_HOLD = NativeMethods.WM_APP + 3;
+
+    /// <summary>
     /// The fade in flight, if any. Only ever read and written on the thread that
-    /// calls <see cref="RunAsync"/>; the fade thread reaches back through the two
-    /// volatile flags on <see cref="Cover"/> and nothing else.
+    /// calls <see cref="RunAsync"/>; the fade thread reaches back through one volatile
+    /// flag and the tasks on <see cref="Cover"/>, and nothing else.
     /// </summary>
     private static Cover? _active;
 
@@ -162,14 +177,34 @@ internal static class WallpaperTransition
         Cover? running = GetRunning();
         if (running is not null)
         {
-            Logger.Debug("fade: relayed to the cover already up");
-            (bool Applied, long Milliseconds) relay = await ApplyTimedAsync(apply).ConfigureAwait(true);
-            if (relay.Applied)
+            // Opaque again first, and only then apply: a change made while the cover
+            // is see-through is a change the user watches happen, which is the cut
+            // this whole file exists to avoid.
+            await running.HoldAsync().ConfigureAwait(true);
+            if (running.IsRunning)
             {
-                running.BeginFade(GetHold(relay.Milliseconds));
+                Logger.Debug("fade: relayed to the cover already up");
+                try
+                {
+                    (bool Applied, long Milliseconds) relay =
+                        await ApplyTimedAsync(apply).ConfigureAwait(true);
+
+                    // Resumed whether or not it worked: on failure the desktop still
+                    // holds the picture the cover is painted with, so fading out is
+                    // invisible - and leaving the cover held would freeze the desktop.
+                    running.BeginFade(GetHold(relay.Milliseconds));
+                    return relay.Applied;
+                }
+                catch
+                {
+                    running.BeginFade(MinHoldMilliseconds);
+                    throw;
+                }
             }
 
-            return relay.Applied;
+            // It finished while it was being asked to hold. Nothing was applied yet,
+            // so this falls through and gets a fade of its own.
+            _active = null;
         }
 
         Cover cover = new Cover(previousPath, fit);
@@ -431,7 +466,20 @@ internal static class WallpaperTransition
         private readonly TaskCompletionSource<bool> _ready =
             new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>
+        /// Completed when the fade thread ends, whatever ended it. The backstop under
+        /// every wait on this cover: a caller can be sure it is answered, because this
+        /// one is set in a finally rather than by a message that has to be delivered.
+        /// </summary>
+        private readonly TaskCompletionSource<bool> _completed =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Callers waiting for <see cref="WM_FADE_HOLD"/> to be carried out.</summary>
+        private readonly ConcurrentQueue<TaskCompletionSource<bool>> _holds =
+            new ConcurrentQueue<TaskCompletionSource<bool>>();
+
         private ApplicationContext? _loop;
+        private IntPtr _host;
         private Size _size;
         private IntPtr _memoryDc;
         private IntPtr _bitmap;
@@ -439,7 +487,16 @@ internal static class WallpaperTransition
         private int _hold;
         private int _ticks;
         private int _relays;
+        private int _folds;
         private bool _fading;
+
+        /// <summary>
+        /// Whether the cover is currently hiding the desktop completely, which is the
+        /// condition for changing the wallpaper without it being watched. True from the
+        /// moment it goes up until the first tick that lowers the alpha, and again
+        /// after every successful <see cref="Fold"/>.
+        /// </summary>
+        private bool _opaque = true;
 
         /// <summary>Set by the fade thread when its message loop has ended.</summary>
         private volatile bool _finished;
@@ -498,6 +555,30 @@ internal static class WallpaperTransition
             }
 
             return await ready.ConfigureAwait(true);
+        }
+
+        /// <summary>
+        /// Makes the cover opaque again, so the wallpaper can be changed underneath it
+        /// unseen, and reports when that has actually happened.
+        ///
+        /// <para>
+        /// Answered rather than fired and forgotten, because the order matters: what
+        /// goes opaque is a picture of the desktop as it is *now*, and taking it after
+        /// the new wallpaper is up would fold in the very thing being hidden.
+        /// </para>
+        /// <para>
+        /// The wait is safe by construction rather than by timeout: it ends either on
+        /// the answer or on the fade thread ending, and the latter is signalled from a
+        /// finally, so a message that never gets delivered cannot leave anyone hanging.
+        /// </para>
+        /// </summary>
+        public Task HoldAsync()
+        {
+            TaskCompletionSource<bool> pending =
+                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _holds.Enqueue(pending);
+            Post(WM_FADE_HOLD, 0);
+            return Task.WhenAny(pending.Task, _completed.Task);
         }
 
         /// <summary>
@@ -564,12 +645,26 @@ internal static class WallpaperTransition
             }
             finally
             {
-                Destroy();
-
-                // Last, so that a caller which sees the fade as finished also sees a
-                // thread that has already let go of Explorer's window.
+                // First, so that a caller asking whether this cover can still take a
+                // change gets "no" for the whole of the teardown rather than only
+                // after it.
                 _finished = true;
+
+                Destroy();
+                ReleaseWaiters();
             }
+        }
+
+        /// <summary>Ends every wait on this cover. Called once, from a finally.</summary>
+        private void ReleaseWaiters()
+        {
+            while (_holds.TryDequeue(out TaskCompletionSource<bool>? pending))
+            {
+                pending.TrySetResult(false);
+            }
+
+            _ready.TrySetResult(false);
+            _completed.TrySetResult(true);
         }
 
         /// <summary>
@@ -633,6 +728,7 @@ internal static class WallpaperTransition
                 }
 
                 Show(host);
+                _host = host;
 
                 if (Logger.IsEnabled(LogLevel.Debug))
                 {
@@ -867,7 +963,8 @@ internal static class WallpaperTransition
                     "fade: done ticks=" + _ticks.ToString(CultureInfo.InvariantCulture) +
                     " elapsed=" + _clock.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) +
                     " hold=" + _hold.ToString(CultureInfo.InvariantCulture) +
-                    " relays=" + _relays.ToString(CultureInfo.InvariantCulture));
+                    " relays=" + _relays.ToString(CultureInfo.InvariantCulture) +
+                    " folds=" + _folds.ToString(CultureInfo.InvariantCulture));
             }
 
             // The window first: it is the only thing that paints out of the device
@@ -925,6 +1022,21 @@ internal static class WallpaperTransition
                     return;
                 }
 
+                case WM_FADE_HOLD:
+                    try
+                    {
+                        Fold();
+                    }
+                    finally
+                    {
+                        if (_holds.TryDequeue(out TaskCompletionSource<bool>? pending))
+                        {
+                            pending.TrySetResult(true);
+                        }
+                    }
+
+                    return;
+
                 case WM_FADE_BEGIN:
                     OnBeginFade(m.WParam.ToInt32());
                     return;
@@ -938,16 +1050,103 @@ internal static class WallpaperTransition
         }
 
         /// <summary>
-        /// Starts the fade, or puts the hold back to the beginning when a second
-        /// change lands on a cover that is still opaque.
+        /// Pauses the fade with the cover opaque, having first folded whatever is on
+        /// screen into the cover's own picture so that nothing appears to change.
+        ///
+        /// <para>
+        /// Halfway through a fade the desktop shows the cover's picture at some alpha
+        /// over the wallpaper behind it. Blending that wallpaper into the cover by the
+        /// complementary alpha makes the cover hold exactly the image that was being
+        /// composed - so raising the alpha back to opaque replaces a composition with
+        /// an identical picture and not one pixel moves. The wallpaper can then be
+        /// changed underneath unseen and the fade picks up from its own midpoint,
+        /// which is why a click during a fade reads as one continuous transition from
+        /// the first picture to the last instead of a cut to the new one.
+        /// </para>
+        /// <para>
+        /// There is nothing to fold while the cover is still opaque, which is the
+        /// common case - clicks usually arrive during the hold. The clock is stopped
+        /// either way: the alpha must not move while the caller changes the wallpaper,
+        /// and an apply on a slow machine easily outlasts the hold it interrupted.
+        /// </para>
+        /// </summary>
+        private void Fold()
+        {
+            if (!_fading)
+            {
+                // Not started, so it is opaque and standing still already.
+                return;
+            }
+
+            _timer.Stop();
+
+            if (_opaque || _host == IntPtr.Zero)
+            {
+                return;
+            }
+
+            byte alpha = GetAlpha(_clock.ElapsedMilliseconds - _hold);
+
+            IntPtr hostDc = NativeMethods.GetDC(_host);
+            if (hostDc == IntPtr.Zero)
+            {
+                // The cover keeps the picture it had. Going opaque from here is a jump
+                // back to the outgoing picture, so leave the alpha where it is and let
+                // the change show - the same cut this used to be, and no worse.
+                Logger.Debug("fade: the wallpaper window has no device context, not folding");
+                return;
+            }
+
+            try
+            {
+                NativeMethods.BLENDFUNCTION blend = new NativeMethods.BLENDFUNCTION
+                {
+                    BlendOp = NativeMethods.AC_SRC_OVER,
+                    SourceConstantAlpha = (byte)(255 - alpha),
+                };
+
+                if (!NativeMethods.AlphaBlend(
+                        _memoryDc, 0, 0, _size.Width, _size.Height,
+                        hostDc, 0, 0, _size.Width, _size.Height,
+                        blend))
+                {
+                    Logger.Debug("fade: folding the wallpaper into the cover failed");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                // msimg32 is a system library, but this is the only call into it.
+                Logger.Warn("fade: alphablend is not usable, letting the change show error=" + ex.Message);
+                return;
+            }
+            finally
+            {
+                NativeMethods.ReleaseDC(_host, hostDc);
+            }
+
+            // Paint before raising the alpha, not after: the wrong order would put the
+            // outgoing picture back up at full strength for as long as it takes to
+            // repaint. This order can at worst show one frame that is slightly too far
+            // towards the new picture, and only if DWM happens to compose between the
+            // two calls.
+            NativeMethods.InvalidateRect(Handle, IntPtr.Zero, false);
+            NativeMethods.UpdateWindow(Handle);
+            NativeMethods.SetLayeredWindowAttributes(Handle, 0, 255, NativeMethods.LWA_ALPHA);
+
+            _opaque = true;
+            _folds++;
+        }
+
+        /// <summary>
+        /// Starts the fade, or puts the hold back to the beginning when a change lands
+        /// on a cover that is already up.
         ///
         /// <para>
         /// Restarting is what makes a burst of clicks read as one transition: every
-        /// change arriving while the cover is still hiding the desktop is invisible,
-        /// and the fade that eventually runs goes from the first picture straight to
-        /// the last. It is deliberately not done once the alpha has started moving -
-        /// putting a half faded cover back to opaque is a flash, and a worse artefact
-        /// than the change it would be hiding.
+        /// change is applied while the cover hides the desktop - either because the
+        /// fade had not started yet or because <see cref="Fold"/> just made it opaque
+        /// again - and the fade that eventually runs ends on the last picture chosen.
         /// </para>
         /// </summary>
         private void OnBeginFade(int hold)
@@ -962,11 +1161,37 @@ internal static class WallpaperTransition
             }
 
             _relays++;
-            if (_clock.ElapsedMilliseconds < _hold)
+
+            if (!_opaque)
             {
-                _hold = hold;
-                _clock.Restart();
+                // The fold could not happen, so the cover is part way through and
+                // raising it back to opaque would put the outgoing picture on screen
+                // again - a flash, and a worse one than the change it would hide. The
+                // fade already running is let finish instead, which shows the change:
+                // the cut this used to be, on a path that is now the exception.
+                _timer.Start();
+                return;
             }
+
+            _hold = hold;
+            _clock.Restart();
+            _timer.Start();
+        }
+
+        /// <summary>The alpha a fade this far along should be showing.</summary>
+        private static byte GetAlpha(long elapsedSinceHold)
+        {
+            double progress = elapsedSinceHold / (double)FadeMilliseconds;
+            if (progress >= 1.0)
+            {
+                return 0;
+            }
+
+            // Smoothstep rather than a straight ramp: a linear alpha starts and stops
+            // with a visible edge, and the ends are exactly the moments a wallpaper
+            // change is being looked at.
+            double eased = progress * progress * (3.0 - (2.0 * progress));
+            return (byte)(255.0 - (eased * 255.0));
         }
 
         /// <summary>
@@ -1016,19 +1241,15 @@ internal static class WallpaperTransition
                     return;
                 }
 
-                double progress = (elapsed - _hold) / (double)FadeMilliseconds;
-                if (progress >= 1.0)
+                if (elapsed - _hold >= FadeMilliseconds)
                 {
                     Finish();
                     return;
                 }
 
-                // Smoothstep rather than a straight ramp: a linear alpha starts and
-                // stops with a visible edge, and the ends are exactly the moments a
-                // wallpaper change is being looked at.
-                double eased = progress * progress * (3.0 - (2.0 * progress));
-                byte alpha = (byte)(255.0 - (eased * 255.0));
+                byte alpha = GetAlpha(elapsed - _hold);
                 NativeMethods.SetLayeredWindowAttributes(Handle, 0, alpha, NativeMethods.LWA_ALPHA);
+                _opaque = alpha == 255;
             }
             catch (Exception ex)
             {

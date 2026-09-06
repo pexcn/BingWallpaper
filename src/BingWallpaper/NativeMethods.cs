@@ -355,6 +355,49 @@ internal static class NativeMethods
     public static extern bool BitBlt(
         IntPtr destination, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, uint rop);
 
+    /// <summary>AC_SRC_OVER - the only blend operation GDI defines, wingdi.h.</summary>
+    public const byte AC_SRC_OVER = 0x00;
+
+    /// <summary>
+    /// BLENDFUNCTION, wingdi.h. Four bytes, of which two are always zero: the blend
+    /// operation has one legal value, and AlphaFormat stays zero to say the source
+    /// has no alpha channel of its own, leaving SourceConstantAlpha in charge.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BLENDFUNCTION
+    {
+        public byte BlendOp;
+        public byte BlendFlags;
+        public byte SourceConstantAlpha;
+        public byte AlphaFormat;
+    }
+
+    /// <summary>
+    /// msimg32!AlphaBlend. Available since Windows 2000. Writes
+    /// alpha*source + (1-alpha)*destination into the destination, which is the one
+    /// operation GDI has for mixing two pictures by a weight.
+    /// </summary>
+    [DllImport("msimg32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool AlphaBlend(
+        IntPtr destination,
+        int x,
+        int y,
+        int width,
+        int height,
+        IntPtr source,
+        int sourceX,
+        int sourceY,
+        int sourceWidth,
+        int sourceHeight,
+        BLENDFUNCTION blend);
+
+    /// <summary>user32!InvalidateRect. Available since Windows 2000. A null rectangle
+    /// marks the whole client area.</summary>
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool InvalidateRect(IntPtr hWnd, IntPtr rect, [MarshalAs(UnmanagedType.Bool)] bool erase);
+
     /// <summary>
     /// user32!GetDpiForSystem. Available since Windows 10 version 1607 (build 14393),
     /// which is below our minimum of build 19044.
