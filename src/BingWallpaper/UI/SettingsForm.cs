@@ -121,6 +121,40 @@ internal sealed class SettingsForm : Form
 
     public event EventHandler<SettingsChangedEventArgs>? SettingsChanged;
 
+    /// <summary>
+    /// Brings the rotation row into line with the configuration, which the tray menu
+    /// can change while this window is open - by its own "随机轮播" row, or by locking
+    /// the wallpaper, which turns the rotation off.
+    ///
+    /// <para>
+    /// The one setting that needs this: everything else here has no second writer. It
+    /// matters beyond the stale tick, because the handler below compares the box with
+    /// the configuration to decide whether anything changed - a box left ticked over a
+    /// rotation that is already off swallows the click that would turn it on again.
+    /// </para>
+    /// </summary>
+    public void SyncShuffle()
+    {
+        if (IsDisposed || _shuffleBox.Checked == _config.Shuffle)
+        {
+            return;
+        }
+
+        // The same guard the initial load uses: this is the configuration being
+        // reflected, not a setting being made, so nothing is written or announced.
+        // The interval row follows on its own - the handler greys it out before the
+        // guard it stops at.
+        _loading = true;
+        try
+        {
+            _shuffleBox.Checked = _config.Shuffle;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
     protected override CreateParams CreateParams
     {
         get

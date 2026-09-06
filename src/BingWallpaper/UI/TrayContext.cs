@@ -74,10 +74,12 @@ internal sealed class TrayContext : ApplicationContext
     private bool _busy;
 
     /// <summary>
-    /// Set while a favourite started from the tray menu or by the rotation is being
-    /// applied. Separate from <see cref="_busy"/>, which greys the menu and belongs to
-    /// the refresh: a favourite needs no network and should not make the program look
-    /// busy for the third of a second it takes.
+    /// Set while a favourite is being applied, wherever the click came from - the tray
+    /// menu, the picker, or the rotation timer. Raised by the apply itself
+    /// (<see cref="ApplyFavoriteCoreAsync"/>) so that no route to it can be the one
+    /// that forgets. Separate from <see cref="_busy"/>, which greys the menu and
+    /// belongs to the refresh: a favourite needs no network and should not make the
+    /// program look busy for the third of a second it takes.
     /// </summary>
     private bool _applyingFavorite;
 
@@ -223,9 +225,14 @@ internal sealed class TrayContext : ApplicationContext
         _window.BeginInvoke(new Action(() =>
         {
             StartRefresh(userInitiated: false);
-            if (_config.Shuffle)
+
+            // Through the gate rather than starting the timer here: the session
+            // listener is attached above, before this action is queued, so a machine
+            // that was locked during startup has already posted SetSessionLocked ahead
+            // of it - and a round must not be spent on a screen nobody is looking at.
+            RestartShuffleTimer();
+            if (_config.Shuffle && !_sessionLocked)
             {
-                _shuffleTimer.Start();
                 StepShuffle(forward: true);
             }
         }));
@@ -989,9 +996,10 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     private async Task StepIntoFavoriteAsync(string fileName)
     {
-        _applyingFavorite = true;
         try
         {
+            // _applyingFavorite is raised by the apply itself, so that the picker's
+            // route to it is covered by the same guard - see ApplyFavoriteCoreAsync.
             if (!await ApplyFavoriteAsync(fileName).ConfigureAwait(true))
             {
                 ErrorDialog.Show("切换壁纸失败", "详见日志文件。");
@@ -1001,10 +1009,6 @@ internal sealed class TrayContext : ApplicationContext
         {
             Logger.Error("switch: stepping through the favourites failed", ex);
             ErrorDialog.Show("切换壁纸失败", Logger.Describe(ex));
-        }
-        finally
-        {
-            _applyingFavorite = false;
         }
     }
 
@@ -1109,13 +1113,18 @@ internal sealed class TrayContext : ApplicationContext
         // after a false.
         _playlist.Sync(Favorites.Scan());
 
-        if (_applyingFavorite)
+        if (_busy || _applyingFavorite)
         {
-            // The previous step has not finished. Dropped rather than queued, the way
-            // MoveWithinFavorites drops one: the next tick is along shortly, and the
-            // only way to reach this by hand is to reopen the menu inside the third of
-            // a second an apply takes.
-            Logger.Debug("shuffle: step dropped, an apply is still running");
+            // Something else is already deciding the wallpaper. Dropped rather than
+            // queued, the way MoveWithinFavorites drops one: the next tick is along
+            // shortly, and the only way to reach this by hand is to reopen the menu
+            // inside the third of a second an apply takes.
+            //
+            // _busy is a download the picker or the refresh started, which ends by
+            // applying - and possibly locking - the picture the user asked for. A step
+            // taken across it finishes last and wins the desktop, which would leave the
+            // lock on one picture and the menu and the desktop on another.
+            Logger.Debug("shuffle: step dropped, another apply is running busy=" + _busy);
             return false;
         }
 
@@ -1161,7 +1170,6 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     private async Task ShuffleIntoAsync(string fileName)
     {
-        _applyingFavorite = true;
         try
         {
             if (await ApplyFavoriteCoreAsync(fileName).ConfigureAwait(true))
@@ -1172,10 +1180,6 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex)
         {
             Logger.Error("shuffle: applying failed file=" + fileName, ex);
-        }
-        finally
-        {
-            _applyingFavorite = false;
         }
     }
 
@@ -1307,6 +1311,16 @@ internal sealed class TrayContext : ApplicationContext
     /// the rotation answers for itself.
     /// </para>
     /// </summary>
+    /// <para>
+    /// Holder of <see cref="_applyingFavorite"/> for all three of its callers, rather
+    /// than each of them raising it around this call. The picker is why: it applies a
+    /// favourite through the public wrapper above without going near the flag or
+    /// <see cref="_busy"/>, so a rotation tick landing inside the third of a second
+    /// that apply takes used to sail past both guards - and, having started later,
+    /// finish later, leaving the lock on the picture that was clicked and the desktop
+    /// on the one the rotation drew.
+    /// </para>
+    /// </summary>
     private async Task<bool> ApplyFavoriteCoreAsync(string fileName)
     {
         string path = Paths.ResolveWallpaperFile(fileName);
@@ -1316,17 +1330,25 @@ internal sealed class TrayContext : ApplicationContext
             return false;
         }
 
-        if (!await WallpaperService
-                .ApplyAsync(path, _config.Fit, _config.FadeTransition, _appliedPath)
-                .ConfigureAwait(true))
+        _applyingFavorite = true;
+        try
         {
-            return false;
-        }
+            if (!await WallpaperService
+                    .ApplyAsync(path, _config.Fit, _config.FadeTransition, _appliedPath)
+                    .ConfigureAwait(true))
+            {
+                return false;
+            }
 
-        _appliedPath = path;
-        _currentIndex = FindImageIndex(fileName);
-        _appliedImage = _currentIndex >= 0 ? _images[_currentIndex] : null;
-        return true;
+            _appliedPath = path;
+            _currentIndex = FindImageIndex(fileName);
+            _appliedImage = _currentIndex >= 0 ? _images[_currentIndex] : null;
+            return true;
+        }
+        finally
+        {
+            _applyingFavorite = false;
+        }
     }
 
     /// <summary>
@@ -1462,8 +1484,10 @@ internal sealed class TrayContext : ApplicationContext
             // by the rotation - so the file itself is all the metadata there is,
             // unless the picture is a favourite, in which case its title was written
             // down on the day it still had one. Described twice on purpose: the menu
-            // row brackets the date, the tooltip is the one place that stays silent
-            // about the lock.
+            // row brackets the date when the picture is locked, the tooltip never says
+            // so. Locked, not always: the rotation reaches this branch with nothing
+            // locked at all, and the brackets refer to a menu row that is not ticked
+            // then.
             //
             // _appliedPath rather than the pinned file name: the two name the same
             // picture, and this is the one of them that already knows which folder it
@@ -1483,10 +1507,10 @@ internal sealed class TrayContext : ApplicationContext
             // tooltip, which is wider. A title favorites.txt remembered is words
             // someone wrote, and is truncated like any other title; a name that fits
             // is shown whole either way.
-            string line = DescribeWallpaper(date, remembered ? _appliedTitle! : named, locked: true);
+            string line = DescribeWallpaper(date, remembered ? _appliedTitle! : named, locked: pinned);
             if (!remembered && date.Length != 0 && line.Length > MenuTitleLength)
             {
-                line = DescribeWallpaper(date, string.Empty, locked: true);
+                line = DescribeWallpaper(date, string.Empty, locked: pinned);
             }
 
             _titleItem.Text = EscapeMnemonic(Truncate(line, MenuTitleLength));
@@ -1546,6 +1570,12 @@ internal sealed class TrayContext : ApplicationContext
         // The picker paints the same state on a tile, and it can be open while this
         // runs - stepping through the list from the tray menu moves both badges.
         _pickerForm?.RefreshCurrentMarker();
+
+        // The rotation is the one setting with two writers: the menu row here - and
+        // the lock, which turns it off - and the check box in the settings window. A
+        // window left open would otherwise go on showing the state it was opened with,
+        // and its own check box is what the next click there compares against.
+        _settingsForm?.SyncShuffle();
     }
 
     private void ShowSettings()
