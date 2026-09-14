@@ -133,7 +133,8 @@ internal sealed class PickerForm : Form
         KeyPreview = true;
 
         _tabs.Dock = DockStyle.Left;
-        _tabs.SelectedIndexChanged += (_, _) => ShowTab(_tabs.SelectedIndex);
+        _tabs.SelectedIndex = _context.LastPickerTab;
+        _tabs.SelectedIndexChanged += OnTabSelectedIndexChanged;
 
         // The rotation is switched here rather than in the settings window, where it
         // used to be: it is the mode the program is in right now - like the lock, which
@@ -214,6 +215,7 @@ internal sealed class PickerForm : Form
         // One listing, both tabs: the recent tab needs it for its stars and the
         // favourites tab for everything. Titles are not read here - see ShowTab.
         ScanFavorites();
+        ShowTab(_tabs.SelectedIndex);
     }
 
     /// <summary>
@@ -377,7 +379,11 @@ internal sealed class PickerForm : Form
         }
 
         previous?.Dispose();
-        _recent.BeginLoading(_context.ShutdownToken);
+        if (_tabs.SelectedIndex == RecentTab)
+        {
+            _recent.BeginLoading(_context.ShutdownToken);
+        }
+
         UpdateStatusForTab();
     }
 
@@ -391,12 +397,19 @@ internal sealed class PickerForm : Form
         else
         {
             _grid.SetSource(_recent);
+            _recent?.BeginLoading(_context.ShutdownToken);
         }
 
         _shuffleSwitch.Visible = index == FavoritesTab;
         SyncShuffle();
         UpdateStatusForTab();
         _grid.Focus();
+    }
+
+    private void OnTabSelectedIndexChanged(object? sender, EventArgs e)
+    {
+        _context.LastPickerTab = _tabs.SelectedIndex;
+        ShowTab(_tabs.SelectedIndex);
     }
 
     /// <summary>
@@ -1118,6 +1131,7 @@ internal sealed class PickerForm : Form
         private readonly bool[] _failed;
 
         private CancellationTokenSource? _cts;
+        private bool _started;
 
         public RecentTileSource(PickerForm owner, List<BingImageInfo> images)
         {
@@ -1167,6 +1181,12 @@ internal sealed class PickerForm : Form
 
         public void BeginLoading(CancellationToken shutdown)
         {
+            if (_started)
+            {
+                return;
+            }
+
+            _started = true;
             _cts = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
             _ = LoadAsync(_cts.Token);
         }

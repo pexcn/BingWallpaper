@@ -45,6 +45,38 @@ internal sealed class ThumbnailStore : IDisposable
 
     private const long JpegQuality = 85L;
 
+    // Enough for the visible two rows plus TileGrid's one-screen look-ahead. Keeping
+    // decoded copies here makes a picker reopened on the favourites tab paint those
+    // tiles on its first frame instead of rebuilding them one by one from disk.
+    private const int MemoryCacheCapacity = 24;
+
+    private static readonly Dictionary<string, MemoryCacheEntry> MemoryCache =
+        new Dictionary<string, MemoryCacheEntry>(StringComparer.OrdinalIgnoreCase);
+    private static readonly LinkedList<string> MemoryCacheLru = new LinkedList<string>();
+
+    private sealed class MemoryCacheEntry
+    {
+        public MemoryCacheEntry(
+            Bitmap bitmap,
+            long sourceLength,
+            DateTime sourceWriteTimeUtc,
+            LinkedListNode<string> node)
+        {
+            Bitmap = bitmap;
+            SourceLength = sourceLength;
+            SourceWriteTimeUtc = sourceWriteTimeUtc;
+            Node = node;
+        }
+
+        public Bitmap Bitmap { get; }
+
+        public long SourceLength { get; }
+
+        public DateTime SourceWriteTimeUtc { get; }
+
+        public LinkedListNode<string> Node { get; }
+    }
+
     private readonly object _sync = new object();
     private readonly List<string> _pending = new List<string>();
     private readonly AutoResetEvent _signal = new AutoResetEvent(false);
@@ -95,7 +127,15 @@ internal sealed class ThumbnailStore : IDisposable
             keep.Add(names[i]);
             if (!_bitmaps.ContainsKey(names[i]))
             {
-                (work ??= new List<string>()).Add(names[i]);
+                Bitmap? cached = TryGetRemembered(names[i]);
+                if (cached is not null)
+                {
+                    _bitmaps[names[i]] = cached;
+                }
+                else
+                {
+                    (work ??= new List<string>()).Add(names[i]);
+                }
             }
         }
 
@@ -132,6 +172,111 @@ internal sealed class ThumbnailStore : IDisposable
 
         failed = false;
         return null;
+    }
+
+    /// <summary>Returns an owned copy of a thumbnail kept by an earlier picker.</summary>
+    private Bitmap? TryGetRemembered(string fileName)
+    {
+        string key = MemoryCacheKey(fileName);
+        if (!MemoryCache.TryGetValue(key, out MemoryCacheEntry? entry))
+        {
+            return null;
+        }
+
+        if (!TryGetSourceStamp(fileName, out long length, out DateTime writeTimeUtc)
+            || length != entry.SourceLength
+            || writeTimeUtc != entry.SourceWriteTimeUtc)
+        {
+            RemoveMemoryCacheEntry(key, entry);
+            return null;
+        }
+
+        MemoryCacheLru.Remove(entry.Node);
+        MemoryCacheLru.AddLast(entry.Node);
+        try
+        {
+            return new Bitmap(entry.Bitmap);
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("thumbnail: copying memory cache entry failed file=" + fileName + " error=" + ex.Message);
+            RemoveMemoryCacheEntry(key, entry);
+            return null;
+        }
+    }
+
+    /// <summary>Keeps a private copy for the next picker window in this process.</summary>
+    private void Remember(string fileName, Bitmap bitmap)
+    {
+        if (!TryGetSourceStamp(fileName, out long length, out DateTime writeTimeUtc))
+        {
+            return;
+        }
+
+        Bitmap copy;
+        try
+        {
+            copy = new Bitmap(bitmap);
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("thumbnail: copying into memory cache failed file=" + fileName + " error=" + ex.Message);
+            return;
+        }
+
+        string key = MemoryCacheKey(fileName);
+        if (MemoryCache.TryGetValue(key, out MemoryCacheEntry? previous))
+        {
+            RemoveMemoryCacheEntry(key, previous);
+        }
+
+        LinkedListNode<string> node = MemoryCacheLru.AddLast(key);
+        MemoryCache[key] = new MemoryCacheEntry(copy, length, writeTimeUtc, node);
+
+        while (MemoryCache.Count > MemoryCacheCapacity && MemoryCacheLru.First is not null)
+        {
+            string oldestKey = MemoryCacheLru.First.Value;
+            if (MemoryCache.TryGetValue(oldestKey, out MemoryCacheEntry? oldest))
+            {
+                RemoveMemoryCacheEntry(oldestKey, oldest);
+            }
+            else
+            {
+                MemoryCacheLru.RemoveFirst();
+            }
+        }
+    }
+
+    private string MemoryCacheKey(string fileName)
+        => fileName + "\n" + _tileWidth.ToString(CultureInfo.InvariantCulture);
+
+    private static bool TryGetSourceStamp(string fileName, out long length, out DateTime writeTimeUtc)
+    {
+        try
+        {
+            FileInfo source = new FileInfo(Path.Combine(Paths.FavoritesDirectory, fileName));
+            if (source.Exists)
+            {
+                length = source.Length;
+                writeTimeUtc = source.LastWriteTimeUtc;
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("thumbnail: reading source stamp failed file=" + fileName + " error=" + ex.Message);
+        }
+
+        length = 0;
+        writeTimeUtc = default;
+        return false;
+    }
+
+    private static void RemoveMemoryCacheEntry(string key, MemoryCacheEntry entry)
+    {
+        MemoryCache.Remove(key);
+        MemoryCacheLru.Remove(entry.Node);
+        entry.Bitmap.Dispose();
     }
 
     /// <summary>
@@ -527,6 +672,11 @@ internal sealed class ThumbnailStore : IDisposable
         }
 
         _bitmaps[name] = bitmap;
+        if (bitmap is not null)
+        {
+            Remember(name, bitmap);
+        }
+
         Ready?.Invoke(name);
     }
 

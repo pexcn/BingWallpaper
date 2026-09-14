@@ -278,6 +278,9 @@ internal sealed class TrayContext : ApplicationContext
     /// <summary>Thumbnails of <see cref="Images"/>, kept across picker windows.</summary>
     public ThumbnailCache Thumbnails => _thumbnails;
 
+    /// <summary>Selected picker tab, kept only for the lifetime of this process.</summary>
+    public int LastPickerTab { get; set; }
+
     /// <summary>Index into <see cref="Images"/>, or -1 when the wallpaper is not in that list.</summary>
     public int CurrentIndex => _currentIndex;
 
@@ -1655,8 +1658,12 @@ internal sealed class TrayContext : ApplicationContext
             _pickerForm = new PickerForm(this);
         }
 
-        ShowForm(_pickerForm);
+        // Give the grid its source before Show reveals the form. Show does not return
+        // until the window is visible, so loading afterwards briefly paints the empty
+        // grid and then replaces it with the selected tab, which reads as a flash on
+        // every fresh picker window.
         _pickerForm.LoadImages(_images);
+        ShowForm(_pickerForm);
     }
 
     private static void ShowForm(Form form)
