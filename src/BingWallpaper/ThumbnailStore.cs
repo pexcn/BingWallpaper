@@ -45,10 +45,10 @@ internal sealed class ThumbnailStore : IDisposable
 
     private const long JpegQuality = 85L;
 
-    // Enough for the visible two rows plus TileGrid's one-screen look-ahead. Keeping
+    // Enough for the visible two rows plus one row above and below. Keeping
     // decoded copies here makes a picker reopened on the favourites tab paint those
     // tiles on its first frame instead of rebuilding them one by one from disk.
-    private const int MemoryCacheCapacity = 24;
+    private const int MemoryCacheCapacity = 16;
 
     private static readonly Dictionary<string, MemoryCacheEntry> MemoryCache =
         new Dictionary<string, MemoryCacheEntry>(StringComparer.OrdinalIgnoreCase);

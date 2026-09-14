@@ -215,7 +215,7 @@ internal sealed class PickerForm : Form
         // One listing, both tabs: the recent tab needs it for its stars and the
         // favourites tab for everything. Titles are not read here - see ShowTab.
         ScanFavorites();
-        ShowTab(_tabs.SelectedIndex);
+        ShowTab(_tabs.SelectedIndex, restorePosition: true);
     }
 
     /// <summary>
@@ -260,6 +260,15 @@ internal sealed class PickerForm : Form
         _shuffleSwitch.Location = new Point(
             _header.ClientSize.Width - margin - _shuffleSwitch.Width,
             (_header.ClientSize.Height - _shuffleSwitch.Height) / 2);
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+        if (!e.Cancel)
+        {
+            _context.LastPickerScrollOffset = _grid.ScrollOffset;
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -387,16 +396,18 @@ internal sealed class PickerForm : Form
         UpdateStatusForTab();
     }
 
-    private void ShowTab(int index)
+    private void ShowTab(int index, bool restorePosition = false)
     {
+        int scrollOffset = restorePosition ? _context.LastPickerScrollOffset : 0;
+
         if (index == FavoritesTab)
         {
             EnsureFavoritesSource();
-            _grid.SetSource(_favorites);
+            _grid.SetSource(_favorites, scrollOffset);
         }
         else
         {
-            _grid.SetSource(_recent);
+            _grid.SetSource(_recent, scrollOffset);
             _recent?.BeginLoading(_context.ShutdownToken);
         }
 

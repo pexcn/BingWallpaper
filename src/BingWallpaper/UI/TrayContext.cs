@@ -281,6 +281,9 @@ internal sealed class TrayContext : ApplicationContext
     /// <summary>Selected picker tab, kept only for the lifetime of this process.</summary>
     public int LastPickerTab { get; set; }
 
+    /// <summary>Scroll offset of the picker tab that was visible when it last closed.</summary>
+    public int LastPickerScrollOffset { get; set; }
+
     /// <summary>Index into <see cref="Images"/>, or -1 when the wallpaper is not in that list.</summary>
     public int CurrentIndex => _currentIndex;
 

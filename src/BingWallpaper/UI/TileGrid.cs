@@ -69,7 +69,7 @@ internal interface ITileSource
     TileInfo GetInfo(int index);
 
     /// <summary>
-    /// Declares the range worth holding bitmaps for - the visible tiles plus a screen
+    /// Declares the range worth holding bitmaps for - the visible tiles plus one row
     /// on either side. Called on every scroll and resize.
     /// </summary>
     void SetWindow(int first, int count);
@@ -155,6 +155,9 @@ internal sealed class TileGrid : ScrollableControl
     /// <summary>Index the keyboard is on, or -1.</summary>
     public int FocusedIndex => _focused;
 
+    /// <summary>Current vertical scroll offset in device pixels.</summary>
+    public int ScrollOffset => -AutoScrollPosition.Y;
+
     /// <summary>Device pixel size of one cell, tile plus its margins.</summary>
     public static int CellWidth => DpiScale.Round(TileWidth) + (DpiScale.Round(TileMargin) * 2);
 
@@ -176,12 +179,22 @@ internal sealed class TileGrid : ScrollableControl
 
     /// <summary>
     /// Swaps the data behind the grid. The scroll position and the focus belong to the
-    /// list that was showing, so both go back to the top.
+    /// list that was showing, so both go back to the top unless a new picker window is
+    /// restoring the offset it had when it was closed.
     /// </summary>
-    public void SetSource(ITileSource? source)
+    public void SetSource(ITileSource? source, int scrollOffset = 0)
     {
         if (ReferenceEquals(_source, source))
         {
+            if (scrollOffset > 0)
+            {
+                _windowFirst = -1;
+                _windowCount = 0;
+                AutoScrollPosition = new Point(0, scrollOffset);
+                UpdateWindow();
+                Invalidate();
+            }
+
             return;
         }
 
@@ -202,6 +215,10 @@ internal sealed class TileGrid : ScrollableControl
         _windowCount = 0;
         AutoScrollPosition = new Point(0, 0);
         Relayout();
+        if (scrollOffset > 0)
+        {
+            AutoScrollPosition = new Point(0, scrollOffset);
+        }
 
         // The first window has to be declared here: without a scroll or a resize to
         // follow, nothing else would ever ask the source to load anything.
@@ -416,8 +433,8 @@ internal sealed class TileGrid : ScrollableControl
     }
 
     /// <summary>
-    /// Tells the source which tiles to hold bitmaps for: what is visible plus a screen
-    /// above and below, so a slow scroll paints from memory instead of from the queue.
+    /// Tells the source which tiles to hold bitmaps for: what is visible plus one row
+    /// above and below, so the next wheel step paints from memory instead of the queue.
     /// </summary>
     private void UpdateWindow()
     {
@@ -433,9 +450,9 @@ internal sealed class TileGrid : ScrollableControl
             return;
         }
 
-        int screen = Math.Max(_columns, ((ClientSize.Height / CellHeight) + 1) * _columns);
-        int from = Math.Max(0, first - screen);
-        int to = Math.Min(source.Count - 1, last + screen);
+        int prefetch = _columns;
+        int from = Math.Max(0, first - prefetch);
+        int to = Math.Min(source.Count - 1, last + prefetch);
         int count = to - from + 1;
 
         if (from == _windowFirst && count == _windowCount)
