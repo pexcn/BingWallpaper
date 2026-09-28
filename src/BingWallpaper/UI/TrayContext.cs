@@ -34,13 +34,6 @@ internal sealed class TrayContext : ApplicationContext
 
     /// <summary>
     /// What the title row says while a pass holds the desktop.
-    ///
-    /// <para>
-    /// A constant because leaving the busy state has to be able to recognize its own
-    /// caption. The row is otherwise left as it was found - that is what keeps a
-    /// failure message on screen - and a pass that ends with no picture to name would
-    /// go on claiming to be working until some later apply wrote over it.
-    /// </para>
     /// </summary>
     private const string BusyTitle = "正在处理…";
 
@@ -84,6 +77,8 @@ internal sealed class TrayContext : ApplicationContext
     private SettingsForm? _settingsForm;
     private PickerForm? _pickerForm;
     private bool _busy;
+    private bool _lastRefreshFailed;
+    private bool _pinnedRestorePending;
 
     /// <summary>
     /// Covers a favourite application and its subsequent pin and menu updates.
@@ -377,6 +372,7 @@ internal sealed class TrayContext : ApplicationContext
         _currentIndex = index;
         _appliedPath = path;
         _appliedImage = image;
+        _pinnedRestorePending = false;
 
         // Everything that lands here came out of _images - a refresh, a step through
         // the window, a tile on the recent tab - so this is where stepping goes back
@@ -643,6 +639,7 @@ internal sealed class TrayContext : ApplicationContext
                 Paths.WallpaperDirectory,
                 _config.Resolution,
                 BuildProtectedFiles());
+            _lastRefreshFailed = false;
             Logger.Info("refresh: done");
         }
         catch (OperationCanceledException)
@@ -652,7 +649,7 @@ internal sealed class TrayContext : ApplicationContext
         catch (Exception ex)
         {
             Logger.Error("refresh: cycle failed", ex);
-            _titleItem.Text = "刷新失败，详见日志文件";
+            _lastRefreshFailed = true;
             if (userInitiated)
             {
                 ErrorDialog.Show("刷新失败", Logger.Describe(ex));
@@ -697,10 +694,17 @@ internal sealed class TrayContext : ApplicationContext
         // skip on (see IsCurrentWallpaper). One SystemParametersInfoW call per start
         // is cheap, and applying a picture that is already there changes nothing.
         Logger.Info("pin: restoring file=" + _config.PinnedWallpaper);
-        WallpaperService.Apply(path, _config.Fit);
+        if (!WallpaperService.Apply(path, _config.Fit))
+        {
+            _pinnedRestorePending = true;
+            Logger.Error("pin: restoring failed file=" + _config.PinnedWallpaper);
+            UpdateMenuState();
+            return;
+        }
 
         _appliedPath = path;
         _currentIndex = -1;
+        _pinnedRestorePending = false;
         UpdateMenuState();
     }
 
@@ -742,12 +746,23 @@ internal sealed class TrayContext : ApplicationContext
             return;
         }
 
+        if (_pinnedRestorePending)
+        {
+            if (!await WallpaperService.ApplyAsync(path, _config.Fit, fade: false, previousPath: null)
+                    .ConfigureAwait(true))
+            {
+                throw new InvalidOperationException("Restoring the pinned wallpaper failed.");
+            }
+
+            _pinnedRestorePending = false;
+        }
+
         // The file is there and the desktop was not touched by anyone this program
         // knows about, so there is nothing to apply - only the metadata to catch up.
         _appliedPath = path;
         _currentIndex = index;
         _appliedImage = index >= 0 ? _images[index] : null;
-        Logger.Info("pin: active, desktop left alone file=" + fileName);
+        Logger.Info("pin: active file=" + fileName);
         UpdateMenuState();
     }
 
@@ -840,6 +855,7 @@ internal sealed class TrayContext : ApplicationContext
 
         if (value.Length == 0)
         {
+            _pinnedRestorePending = false;
             // Released, so the wallpaper is back under the timer - and the timer's
             // list is the window, not favorites\. Nothing downstream will do this:
             // releasing applies nothing now, so left to the next apply the two step
@@ -1431,6 +1447,7 @@ internal sealed class TrayContext : ApplicationContext
             _appliedPath = path;
             _currentIndex = FindImageIndex(fileName);
             _appliedImage = _currentIndex >= 0 ? _images[_currentIndex] : null;
+            _pinnedRestorePending = false;
             if (pinAfterwards)
             {
                 // The click chose the folder, even if the picture is also recent.
@@ -1466,16 +1483,15 @@ internal sealed class TrayContext : ApplicationContext
     /// picture, so nothing on screen changes; the record is what is being repaired.
     /// </para>
     /// </summary>
-    public void NotifyWallpaperMoved(string fileName)
+    public bool NotifyWallpaperMoved(string fileName)
     {
         if (_appliedPath is null
             || !string.Equals(Path.GetFileName(_appliedPath), fileName, StringComparison.OrdinalIgnoreCase))
         {
-            return;
+            return true;
         }
 
         string path = Paths.ResolveWallpaperFile(fileName);
-        _appliedPath = path;
 
         // Un-favouriting takes the list with it - the picture is back in the daily
         // cache and there is no folder left to step through. Favouriting does not do
@@ -1483,7 +1499,22 @@ internal sealed class TrayContext : ApplicationContext
         // gone to the favourites tab to pick one, so the rows stay where they were.
         _steppingFavorites = _steppingFavorites && Favorites.Contains(fileName);
 
-        WallpaperService.Apply(path, _config.Fit);
+        if (!WallpaperService.Apply(path, _config.Fit))
+        {
+            _appliedPath = null;
+            _appliedImage = null;
+            _currentIndex = -1;
+            _pinnedRestorePending = _config.IsPinned
+                && string.Equals(_config.PinnedWallpaper, fileName, StringComparison.OrdinalIgnoreCase);
+            Logger.Error("wallpaper: updating the moved file failed file=" + fileName);
+            UpdateMenuState();
+            ErrorDialog.Show("更新壁纸路径失败", "详见日志文件。");
+            return false;
+        }
+
+        _appliedPath = path;
+        _pinnedRestorePending = false;
+        return true;
     }
 
     /// <summary>
@@ -1624,18 +1655,12 @@ internal sealed class TrayContext : ApplicationContext
         }
         else if (!_busy)
         {
-            // Nothing has reached the desktop this session, so the row can only say
-            // why. Whatever it holds was written by the pass that just ended and is
-            // kept - "刷新失败，详见日志文件" is the one worth keeping - with the one
-            // exception of BusyTitle, which described that pass and does not outlive
-            // it: left standing it tells the user the program is working while nothing
-            // is running, and nothing writes over it until the next apply, which in the
-            // rotation is a whole interval away.
+            // No picture has reached the desktop this session.
             if (_images.Count == 0)
             {
                 _titleItem.Text = "尚未获取到壁纸信息";
             }
-            else if (string.Equals(_titleItem.Text, BusyTitle, StringComparison.Ordinal))
+            else
             {
                 _titleItem.Text = shuffling && _playlist.Count == 0
                     ? "收藏夹是空的，无法轮播"
@@ -1647,10 +1672,15 @@ internal sealed class TrayContext : ApplicationContext
         {
             _titleItem.Text = BusyTitle;
         }
+        else if (_lastRefreshFailed)
+        {
+            _titleItem.Text = "刷新失败，详见日志文件";
+        }
 
         // Clickable only when there is somewhere to go: no link, or a title that
         // currently says something else, means the row is just a caption.
-        _titleItem.Enabled = !_busy && !string.IsNullOrWhiteSpace(CurrentCopyrightLink);
+        _titleItem.Enabled = !_busy && !_lastRefreshFailed
+            && !string.IsNullOrWhiteSpace(CurrentCopyrightLink);
 
         if (shuffling)
         {
@@ -1684,8 +1714,8 @@ internal sealed class TrayContext : ApplicationContext
         _shuffleItem.Checked = shuffling;
         _shuffleItem.Enabled = !_busy;
 
-        _pinItem.Checked = pinned;
-        _pinItem.Enabled = !_busy && (pinned || _appliedPath is not null);
+        _pinItem.Checked = pinned && !_pinnedRestorePending;
+        _pinItem.Enabled = !_busy && !_pinnedRestorePending && (pinned || _appliedPath is not null);
 
         // The picker paints the same state on a tile, and it can be open while this
         // runs - stepping through the list from the tray menu moves both badges.
@@ -1766,7 +1796,11 @@ internal sealed class TrayContext : ApplicationContext
             case SettingKind.Fit:
                 if (_appliedPath is not null)
                 {
-                    WallpaperService.Apply(_appliedPath, _config.Fit);
+                    if (!WallpaperService.Apply(_appliedPath, _config.Fit))
+                    {
+                        Logger.Error("wallpaper: updating fit failed fit=" + _config.Fit);
+                        ErrorDialog.Show("更新壁纸填充方式失败", "详见日志文件。");
+                    }
                 }
 
                 break;

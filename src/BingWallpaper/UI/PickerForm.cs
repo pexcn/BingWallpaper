@@ -1050,9 +1050,11 @@ internal sealed class PickerForm : Form
 
             if (Favorites.Add(fileName, image.DisplayTitle, image.CopyrightLink))
             {
-                _context.NotifyWallpaperMoved(fileName);
+                bool applied = _context.NotifyWallpaperMoved(fileName);
                 ReloadFavorites(keepPosition: true);
-                SetTransientStatus("已收藏：" + image.DisplayLine);
+                SetTransientStatus(applied
+                    ? "已收藏：" + image.DisplayLine
+                    : "已收藏，但更新壁纸路径失败，详见日志文件。");
             }
             else
             {
@@ -1102,9 +1104,11 @@ internal sealed class PickerForm : Form
             return;
         }
 
-        _context.NotifyWallpaperMoved(fileName);
+        bool applied = _context.NotifyWallpaperMoved(fileName);
         ReloadFavorites(keepPosition: true);
-        SetTransientStatus("已取消收藏，图片回到最近缓存中。");
+        SetTransientStatus(applied
+            ? "已取消收藏，图片回到最近缓存中。"
+            : "已取消收藏，但更新壁纸路径失败，详见日志文件。");
     }
 
     private static void OpenLink(string url)

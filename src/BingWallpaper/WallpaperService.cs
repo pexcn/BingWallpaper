@@ -127,11 +127,14 @@ internal static class WallpaperService
             NativeMethods.SPIF_UPDATEINIFILE | NativeMethods.SPIF_SENDCHANGE);
 
         int lastError = Marshal.GetLastWin32Error();
-        Logger.Info(
-            "wallpaper: applied ok=" + ok +
-            " fit=" + fit +
-            " path=" + fullPath +
-            (ok ? string.Empty : " lasterror=" + lastError));
+        if (ok)
+        {
+            Logger.Info("wallpaper: applied fit=" + fit + " path=" + fullPath);
+        }
+        else
+        {
+            Logger.Error("wallpaper: apply failed fit=" + fit + " path=" + fullPath + " lasterror=" + lastError);
+        }
 
         return ok;
     }
