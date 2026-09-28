@@ -1714,8 +1714,8 @@ internal sealed class TrayContext : ApplicationContext
         _shuffleItem.Checked = shuffling;
         _shuffleItem.Enabled = !_busy;
 
-        _pinItem.Checked = pinned && !_pinnedRestorePending;
-        _pinItem.Enabled = !_busy && !_pinnedRestorePending && (pinned || _appliedPath is not null);
+        _pinItem.Checked = pinned;
+        _pinItem.Enabled = !_busy && (pinned || _appliedPath is not null);
 
         // The picker paints the same state on a tile, and it can be open while this
         // runs - stepping through the list from the tray menu moves both badges.
