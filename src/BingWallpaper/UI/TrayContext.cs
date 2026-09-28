@@ -86,12 +86,9 @@ internal sealed class TrayContext : ApplicationContext
     private bool _busy;
 
     /// <summary>
-    /// Set while a favourite is being applied, wherever the click came from - the tray
-    /// menu, the picker, or the rotation timer. Raised by the apply itself
-    /// (<see cref="ApplyFavoriteCoreAsync"/>) so that no route to it can be the one
-    /// that forgets. Separate from <see cref="_busy"/>, which greys the menu and
-    /// belongs to the refresh: a favourite needs no network and should not make the
-    /// program look busy for the third of a second it takes.
+    /// Covers a favourite application and its subsequent pin and menu updates.
+    /// Separate from <see cref="_busy"/>, which greys the menu: a favourite needs no
+    /// network and should not make the program look busy while it is applied.
     /// </summary>
     private bool _applyingFavorite;
 
@@ -135,9 +132,8 @@ internal sealed class TrayContext : ApplicationContext
     private string? _appliedLink;
 
     /// <summary>
-    /// Set when a trigger arrives while a refresh is running. These used to be dropped,
-    /// which left the INI naming one setting while the desktop showed a picture from
-    /// another, with nothing to reconcile the two.
+    /// Set when a trigger arrives while another wallpaper operation is running.
+    /// These used to be dropped, leaving the INI and desktop out of sync.
     ///
     /// <para>
     /// SettingsForm debounces its drop downs, so the bursts this was written for no
@@ -297,11 +293,7 @@ internal sealed class TrayContext : ApplicationContext
     /// <summary>Whether the wallpaper is held against the refresh timer.</summary>
     public bool IsPinned => _config.IsPinned;
 
-    /// <summary>
-    /// Whether a refresh pass owns the program. What greys the tray menu out, and with
-    /// it the picker's rotation button - the two switch the same thing and must not
-    /// disagree about whether it can be switched.
-    /// </summary>
+    /// <summary>Whether a refresh or recent-image switch owns the program.</summary>
     public bool IsBusy => _busy;
 
     public CancellationToken ShutdownToken => _shutdown.Token;
@@ -333,12 +325,12 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>Downloads (if needed) and applies the image at <paramref name="index"/>.</summary>
-    public async Task ApplyIndexAsync(int index, bool force)
+    public async Task<bool> ApplyIndexAsync(int index, bool force)
     {
         if (index < 0 || index >= _images.Count)
         {
             Logger.Warn("apply: index out of range index=" + index + " count=" + _images.Count);
-            return;
+            return false;
         }
 
         BingImageInfo image = _images[index];
@@ -374,9 +366,12 @@ internal sealed class TrayContext : ApplicationContext
         }
         else
         {
-            await WallpaperService
-                .ApplyAsync(path, _config.Fit, _config.FadeTransition, _appliedPath)
-                .ConfigureAwait(true);
+            if (!await WallpaperService
+                    .ApplyAsync(path, _config.Fit, _config.FadeTransition, _appliedPath)
+                    .ConfigureAwait(true))
+            {
+                return false;
+            }
         }
 
         _currentIndex = index;
@@ -388,6 +383,7 @@ internal sealed class TrayContext : ApplicationContext
         // to the window, whether or not the file happens to sit in favorites\.
         _steppingFavorites = false;
         UpdateMenuState();
+        return true;
     }
 
     protected override void Dispose(bool disposing)
@@ -537,14 +533,14 @@ internal sealed class TrayContext : ApplicationContext
     }
 
     /// <summary>
-    /// Asks for a refresh. A trigger that arrives while one is running is remembered
-    /// rather than dropped, and acted on once the running one is done.
+    /// Asks for a refresh. Triggers arriving during another wallpaper operation are
+    /// collapsed into one pass after that operation finishes.
     /// </summary>
     private void StartRefresh(bool userInitiated)
     {
-        if (_busy)
+        if (_busy || _applyingFavorite)
         {
-            Logger.Info("refresh: already running, queued one more pass");
+            Logger.Info("refresh: wallpaper operation running, queued one pass");
             _rerunRequested = true;
 
             // Kept if any of the collapsed triggers was the user's: it decides whether
@@ -557,31 +553,56 @@ internal sealed class TrayContext : ApplicationContext
         _ = RefreshAsync(userInitiated);
     }
 
+    /// <summary>Hands a queued refresh off when a non-refresh operation releases the desktop.</summary>
+    private void StartQueuedRefresh()
+    {
+        if (!_rerunRequested || _busy || _applyingFavorite
+            || _disposed || _shutdown.IsCancellationRequested)
+        {
+            return;
+        }
+
+        bool userInitiated = _rerunUserInitiated;
+        _rerunRequested = false;
+        _rerunUserInitiated = false;
+        Logger.Info("refresh: running the queued pass");
+        _ = RefreshAsync(userInitiated);
+    }
+
     private async Task RefreshAsync(bool userInitiated)
     {
         // A loop rather than a recursive call at the end: a burst of triggers chains one
         // pass after another, and recursion would leave every one of their state machines
         // alive on the heap until the innermost returns.
-        while (true)
+        _busy = true;
+        UpdateMenuState();
+        try
         {
-            await RunRefreshPassAsync(userInitiated).ConfigureAwait(true);
-
-            if (!_rerunRequested || _disposed || _shutdown.IsCancellationRequested)
+            while (true)
             {
-                return;
-            }
+                await RunRefreshPassAsync(userInitiated).ConfigureAwait(true);
 
-            _rerunRequested = false;
-            userInitiated = _rerunUserInitiated;
-            _rerunUserInitiated = false;
-            Logger.Info("refresh: running the queued pass");
+                if (!_rerunRequested || _disposed || _shutdown.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                _rerunRequested = false;
+                userInitiated = _rerunUserInitiated;
+                _rerunUserInitiated = false;
+                Logger.Info("refresh: running the queued pass");
+            }
+        }
+        finally
+        {
+            _busy = false;
+            UpdateMenuState();
+            StartQueuedRefresh();
         }
     }
 
     private async Task RunRefreshPassAsync(bool userInitiated)
     {
-        _busy = true;
-        UpdateMenuState();
         try
         {
             Logger.Info("refresh: start userinitiated=" + userInitiated);
@@ -611,7 +632,10 @@ internal sealed class TrayContext : ApplicationContext
             }
             else
             {
-                await ApplyIndexAsync(0, force: userInitiated).ConfigureAwait(true);
+                if (!await ApplyIndexAsync(0, force: userInitiated).ConfigureAwait(true))
+                {
+                    throw new InvalidOperationException("Applying today's wallpaper failed.");
+                }
             }
 
             WallpaperService.Cleanup(Paths.WallpaperDirectory, _config.KeepDays, BuildProtectedFiles());
@@ -633,11 +657,6 @@ internal sealed class TrayContext : ApplicationContext
             {
                 ErrorDialog.Show("刷新失败", Logger.Describe(ex));
             }
-        }
-        finally
-        {
-            _busy = false;
-            UpdateMenuState();
         }
     }
 
@@ -703,13 +722,23 @@ internal sealed class TrayContext : ApplicationContext
             if (index < 0)
             {
                 Logger.Warn("pin: file gone and not downloadable, releasing the pin file=" + fileName);
-                SetPinned(null);
-                await ApplyIndexAsync(0, force: true).ConfigureAwait(true);
+                if (!SetPinned(null))
+                {
+                    throw new InvalidOperationException("Releasing the missing pin failed.");
+                }
+
+                if (!await ApplyIndexAsync(0, force: true).ConfigureAwait(true))
+                {
+                    throw new InvalidOperationException("Applying today's wallpaper after releasing the missing pin failed.");
+                }
                 return;
             }
 
             Logger.Info("pin: file missing, downloading again file=" + fileName);
-            await ApplyIndexAsync(index, force: true).ConfigureAwait(true);
+            if (!await ApplyIndexAsync(index, force: true).ConfigureAwait(true))
+            {
+                throw new InvalidOperationException("Reapplying the missing pinned wallpaper failed.");
+            }
             return;
         }
 
@@ -765,7 +794,7 @@ internal sealed class TrayContext : ApplicationContext
     /// only once it is on disk, so a failed save leaves the program and the
     /// configuration file saying the same thing.
     /// </summary>
-    private void SetPinned(string? fileName)
+    private bool SetPinned(string? fileName)
     {
         string value = fileName ?? string.Empty;
 
@@ -776,7 +805,7 @@ internal sealed class TrayContext : ApplicationContext
         bool stopShuffle = value.Length > 0 && _config.Shuffle;
         if (!stopShuffle && string.Equals(_config.PinnedWallpaper, value, StringComparison.OrdinalIgnoreCase))
         {
-            return;
+            return true;
         }
 
         string previous = _config.PinnedWallpaper;
@@ -797,7 +826,7 @@ internal sealed class TrayContext : ApplicationContext
             _config.Shuffle = previousShuffle;
             Logger.Error("pin: saving the configuration failed", ex);
             ErrorDialog.Show("保存设置失败", Logger.Describe(ex));
-            return;
+            return false;
         }
 
         if (stopShuffle)
@@ -821,6 +850,7 @@ internal sealed class TrayContext : ApplicationContext
 
         Logger.Info(value.Length == 0 ? "pin: released" : "pin: set file=" + value);
         UpdateMenuState();
+        return true;
     }
 
     private void TogglePin()
@@ -1219,10 +1249,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         try
         {
-            if (await ApplyFavoriteCoreAsync(fileName).ConfigureAwait(true))
-            {
-                UpdateMenuState();
-            }
+            await ApplyFavoriteCoreAsync(fileName, pinAfterwards: false).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -1253,36 +1280,40 @@ internal sealed class TrayContext : ApplicationContext
         _shuffleTimer.Start();
     }
 
-    private async Task MoveToAsync(int index, bool pinAfterwards)
+    private async Task<bool> MoveToAsync(int index, bool pinAfterwards)
     {
-        if (_busy)
+        if (_busy || _applyingFavorite || index < 0 || index >= _images.Count)
         {
-            return;
+            return false;
         }
 
         _busy = true;
         UpdateMenuState();
         try
         {
-            await ApplyIndexAsync(index, force: true).ConfigureAwait(true);
-            if (pinAfterwards && _appliedPath is not null)
+            if (!await ApplyIndexAsync(index, force: true).ConfigureAwait(true))
             {
-                SetPinned(Path.GetFileName(_appliedPath));
+                return false;
             }
+
+            return !pinAfterwards || (_appliedPath is not null && SetPinned(Path.GetFileName(_appliedPath)));
         }
         catch (OperationCanceledException)
         {
             Logger.Info("switch: cancelled");
+            return false;
         }
         catch (Exception ex)
         {
             Logger.Error("switch: failed", ex);
             ErrorDialog.Show("切换壁纸失败", Logger.Describe(ex));
+            return false;
         }
         finally
         {
             _busy = false;
             UpdateMenuState();
+            StartQueuedRefresh();
         }
     }
 
@@ -1291,7 +1322,7 @@ internal sealed class TrayContext : ApplicationContext
     /// the window is a deliberate choice, so it pins on its own - unlike stepping
     /// through the list from the tray menu, which is just browsing.
     /// </summary>
-    public Task ApplyFromPickerAsync(int index) => MoveToAsync(index, pinAfterwards: true);
+    public Task<bool> ApplyFromPickerAsync(int index) => MoveToAsync(index, pinAfterwards: true);
 
     /// <summary>
     /// Makes sure a picture is in the local cache, downloading it when it is not.
@@ -1332,24 +1363,32 @@ internal sealed class TrayContext : ApplicationContext
     /// belongs.
     /// </para>
     /// </summary>
-    public async Task<bool> ApplyFavoriteAsync(string fileName)
+    public Task<bool> ApplyFavoriteAsync(string fileName)
+        => ApplyFavoriteCoreAsync(fileName, pinAfterwards: true);
+
+    /// <summary>Holds the existing favorite guard across the picker's last-click-wins sequence.</summary>
+    public bool BeginPickerFavoriteBatch()
     {
-        if (!await ApplyFavoriteCoreAsync(fileName).ConfigureAwait(true))
+        if (_busy || _applyingFavorite)
         {
             return false;
         }
 
-        // The one place stepping switches to the folder, and note it is set even when
-        // FindImageIndex found the picture in the window as well: the click was on the
-        // favourites tab, and that is the whole question.
-        _steppingFavorites = true;
-        SetPinned(fileName);
-        UpdateMenuState();
+        _applyingFavorite = true;
         return true;
     }
 
+    public Task<bool> ApplyPickerFavoriteAsync(string fileName)
+        => ApplyFavoriteCoreAsync(fileName, pinAfterwards: true, fromPickerBatch: true);
+
+    public void EndPickerFavoriteBatch()
+    {
+        _applyingFavorite = false;
+        StartQueuedRefresh();
+    }
+
     /// <summary>
-    /// Puts a favourite on the desktop and nothing else - no lock, no stepping list.
+    /// Applies a favourite, optionally pinning it and switching the stepping list.
     ///
     /// <para>
     /// Split out for the rotation, which applies a picture every few minutes and must
@@ -1358,27 +1397,30 @@ internal sealed class TrayContext : ApplicationContext
     /// the rotation answers for itself.
     /// </para>
     /// <para>
-    /// Holder of <see cref="_applyingFavorite"/> for all three routes that reach it,
-    /// rather than each of them raising it around the call. The picker is why: it
-    /// applies a favourite through the public wrapper above and went near neither the
-    /// flag nor <see cref="_busy"/>, so a rotation tick landing inside the third of a
-    /// second that apply takes sailed past both guards - and, having started later,
-    /// finished later, leaving the lock on the picture that was clicked and the
-    /// desktop on the one the rotation drew.
+    /// Holds <see cref="_applyingFavorite"/> until the pin and menu are updated, so a
+    /// queued refresh cannot replace the picture midway through a picker transaction.
     /// </para>
     /// </summary>
-    private async Task<bool> ApplyFavoriteCoreAsync(string fileName)
+    private async Task<bool> ApplyFavoriteCoreAsync(string fileName, bool pinAfterwards, bool fromPickerBatch = false)
     {
-        string path = Paths.ResolveWallpaperFile(fileName);
-        if (!File.Exists(path))
+        if (_busy || (!fromPickerBatch && _applyingFavorite) || (fromPickerBatch && !_applyingFavorite))
         {
-            Logger.Warn("apply: the favourite is gone file=" + fileName);
             return false;
         }
 
-        _applyingFavorite = true;
+        if (!fromPickerBatch)
+        {
+            _applyingFavorite = true;
+        }
         try
         {
+            string path = Paths.ResolveWallpaperFile(fileName);
+            if (!File.Exists(path))
+            {
+                Logger.Warn("apply: the favourite is gone file=" + fileName);
+                return false;
+            }
+
             if (!await WallpaperService
                     .ApplyAsync(path, _config.Fit, _config.FadeTransition, _appliedPath)
                     .ConfigureAwait(true))
@@ -1389,11 +1431,27 @@ internal sealed class TrayContext : ApplicationContext
             _appliedPath = path;
             _currentIndex = FindImageIndex(fileName);
             _appliedImage = _currentIndex >= 0 ? _images[_currentIndex] : null;
+            if (pinAfterwards)
+            {
+                // The click chose the folder, even if the picture is also recent.
+                if (!SetPinned(fileName))
+                {
+                    return false;
+                }
+
+                _steppingFavorites = true;
+            }
+
+            UpdateMenuState();
             return true;
         }
         finally
         {
-            _applyingFavorite = false;
+            if (!fromPickerBatch)
+            {
+                _applyingFavorite = false;
+                StartQueuedRefresh();
+            }
         }
     }
 

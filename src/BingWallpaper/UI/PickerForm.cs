@@ -742,8 +742,14 @@ internal sealed class PickerForm : Form
         SetStatus("正在应用 " + image.DisplayDate + " 的壁纸…");
         try
         {
-            await _context.ApplyFromPickerAsync(index).ConfigureAwait(true);
-            SetTransientStatus((_context.IsPinned ? "已锁定：" : "已应用：") + image.DisplayLine);
+            if (await _context.ApplyFromPickerAsync(index).ConfigureAwait(true))
+            {
+                SetTransientStatus((_context.IsPinned ? "已锁定：" : "已应用：") + image.DisplayLine);
+            }
+            else
+            {
+                SetTransientStatus("未应用或未锁定壁纸，请稍后重试或查看日志文件。");
+            }
         }
         catch (Exception ex)
         {
@@ -796,6 +802,12 @@ internal sealed class PickerForm : Form
             return;
         }
 
+        if (!_context.BeginPickerFavoriteBatch())
+        {
+            SetTransientStatus("未应用壁纸，请稍后重试。");
+            return;
+        }
+
         _busy = true;
         _applyingFavorite = true;
         try
@@ -803,9 +815,9 @@ internal sealed class PickerForm : Form
             while (true)
             {
                 FavoriteItem item = _favoriteItems[index];
-                SetTransientStatus(await _context.ApplyFavoriteAsync(item.FileName).ConfigureAwait(true)
+                SetTransientStatus(await _context.ApplyPickerFavoriteAsync(item.FileName).ConfigureAwait(true)
                     ? "已锁定：" + item.DisplayDate + " · " + item.Title
-                    : "应用失败，详见日志文件。");
+                    : "未应用壁纸，请稍后重试或查看日志文件。");
 
                 if (_pendingFavorite is null)
                 {
@@ -834,6 +846,7 @@ internal sealed class PickerForm : Form
             _pendingFavorite = null;
             _busy = false;
             _grid.Invalidate();
+            _context.EndPickerFavoriteBatch();
         }
     }
 
