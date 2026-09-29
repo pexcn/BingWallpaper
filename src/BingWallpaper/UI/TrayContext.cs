@@ -634,11 +634,12 @@ internal sealed class TrayContext : ApplicationContext
                 }
             }
 
-            WallpaperService.Cleanup(Paths.WallpaperDirectory, _config.KeepDays, BuildProtectedFiles());
+            List<string> protectedFiles = BuildProtectedFiles();
+            WallpaperService.Cleanup(Paths.WallpaperDirectory, _config.KeepDays, protectedFiles);
             WallpaperService.RemoveStaleResolutions(
                 Paths.WallpaperDirectory,
                 _config.Resolution,
-                BuildProtectedFiles());
+                protectedFiles);
             _lastRefreshFailed = false;
             Logger.Info("refresh: done");
         }
@@ -1180,7 +1181,11 @@ internal sealed class TrayContext : ApplicationContext
         // tick on the menu row has to be right either way.
         UpdateMenuState();
 
-        if (!_sessionLocked && !StepShuffle(forward: true) && _playlist.Count == 0)
+        if (!_sessionLocked
+            && !_busy
+            && !_applyingFavorite
+            && !StepShuffle(forward: true)
+            && _playlist.Count == 0)
         {
             // A rotation with nothing to rotate does nothing at all, which from the
             // outside is indistinguishable from the click not having registered. Said
@@ -1200,12 +1205,6 @@ internal sealed class TrayContext : ApplicationContext
     /// </summary>
     private bool StepShuffle(bool forward)
     {
-        // Ahead of the guard below, cheap enough that a dropped step can afford it:
-        // it keeps the round in step with the folder whatever happens next, and it is
-        // what makes Count mean "how many favourites are there" to a caller reading it
-        // after a false.
-        _playlist.Sync(Favorites.Scan());
-
         if (_busy || _applyingFavorite)
         {
             // Something else is already deciding the wallpaper. Dropped rather than
@@ -1220,6 +1219,8 @@ internal sealed class TrayContext : ApplicationContext
             Logger.Debug("shuffle: step dropped, another apply is running busy=" + _busy);
             return false;
         }
+
+        _playlist.Sync(Favorites.Scan());
 
         string? fileName = forward ? _playlist.Next() : _playlist.Previous();
         if (fileName is null)
