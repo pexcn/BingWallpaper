@@ -188,10 +188,10 @@ internal static class WallpaperService
 
     /// <summary>
     /// Deletes cached wallpapers older than <paramref name="keepDays"/>.
-    /// The files in <paramref name="protectedFiles"/> are never deleted, no matter
+    /// The files in <paramref name="protectedSet"/> are never deleted, no matter
     /// how old they are. keepDays == 0 means "keep forever" and skips the whole pass.
     /// </summary>
-    public static int Cleanup(string directory, int keepDays, IReadOnlyCollection<string>? protectedFiles)
+    public static int Cleanup(string directory, int keepDays, HashSet<string> protectedSet)
     {
         if (keepDays <= 0)
         {
@@ -204,7 +204,6 @@ internal static class WallpaperService
             return 0;
         }
 
-        HashSet<string> protectedSet = BuildProtectedSet(protectedFiles);
 
         DateTime threshold = DateTime.UtcNow.AddDays(-keepDays);
         int deleted = 0;
@@ -271,7 +270,7 @@ internal static class WallpaperService
     public static int RemoveStaleResolutions(
         string directory,
         ResolutionKind resolution,
-        IReadOnlyCollection<string>? protectedFiles)
+        HashSet<string> protectedSet)
     {
         if (!Directory.Exists(directory))
         {
@@ -279,7 +278,6 @@ internal static class WallpaperService
         }
 
         string keepSuffix = "_" + AppConfig.ResolutionToString(resolution) + ".jpg";
-        HashSet<string> protectedSet = BuildProtectedSet(protectedFiles);
         int deleted = 0;
 
         try
@@ -380,7 +378,7 @@ internal static class WallpaperService
     /// always the same file - they differ while a pinned picture is being restored
     /// or downloaded again.
     /// </summary>
-    private static HashSet<string> BuildProtectedSet(IReadOnlyCollection<string>? files)
+    internal static HashSet<string> BuildProtectedSet(IReadOnlyCollection<string>? files)
     {
         HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (files is null)

@@ -634,7 +634,7 @@ internal sealed class TrayContext : ApplicationContext
                 }
             }
 
-            List<string> protectedFiles = BuildProtectedFiles();
+            HashSet<string> protectedFiles = WallpaperService.BuildProtectedSet(BuildProtectedFiles());
             WallpaperService.Cleanup(Paths.WallpaperDirectory, _config.KeepDays, protectedFiles);
             WallpaperService.RemoveStaleResolutions(
                 Paths.WallpaperDirectory,
@@ -1826,7 +1826,10 @@ internal sealed class TrayContext : ApplicationContext
                 break;
 
             case SettingKind.KeepDays:
-                WallpaperService.Cleanup(Paths.WallpaperDirectory, _config.KeepDays, BuildProtectedFiles());
+                WallpaperService.Cleanup(
+                    Paths.WallpaperDirectory,
+                    _config.KeepDays,
+                    WallpaperService.BuildProtectedSet(BuildProtectedFiles()));
                 break;
 
             case SettingKind.RunAtStartup:
