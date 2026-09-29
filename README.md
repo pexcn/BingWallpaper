@@ -27,8 +27,8 @@
 
 ## 系统要求
 
-- Windows 10 1903 (build 18362) 及以上，64 位
-- **无需安装 .NET 运行时**：程序基于 .NET Framework 4.8，该版本自 Windows 10 1903 起随系统内置
+- Windows 10 21H2 / LTSC 2021 (build 19044) 及以上，64 位
+- **无需安装 .NET 运行时**：程序基于 .NET Framework 4.8，Windows 10 LTSC 2021 已内置
 
 ## 安装与使用
 

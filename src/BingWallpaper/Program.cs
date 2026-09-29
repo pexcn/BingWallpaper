@@ -25,10 +25,9 @@ internal static class Program
     private static int Main() => RunGui();
 
     /// <summary>One line of environment information, written on every start.</summary>
-    private static void LogEnvironment()
+    private static void LogEnvironment(bool writable, string? writeError)
     {
         string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
-        bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
         Logger.Info(
             "startup: version=" + version +
             " os=" + Environment.OSVersion.Version +
@@ -52,7 +51,8 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
 
         // Portable by contract: no silent fallback to %LOCALAPPDATA%.
-        if (!Paths.IsBaseDirectoryWritable(out string? writeError))
+        bool writable = Paths.IsBaseDirectoryWritable(out string? writeError);
+        if (!writable)
         {
             Logger.Initialize(null);
             MessageBox.Show(
@@ -79,7 +79,7 @@ internal static class Program
         // out of its way: that one marks a run, and this process never became one.
         if (!TryBecomePrimaryInstance())
         {
-            LogEnvironment();
+            LogEnvironment(writable, writeError);
             Logger.Info("startup: another instance is already running, exiting");
             return 0;
         }
@@ -87,7 +87,7 @@ internal static class Program
         // The only decorative line in the log, and only because a process boundary is
         // what you look for first when a log spans several runs.
         Logger.Info("----------------------------------------------------------------");
-        LogEnvironment();
+        LogEnvironment(writable, writeError);
 
         try
         {

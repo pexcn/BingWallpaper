@@ -3,9 +3,9 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <!--
-      .NET Framework 4.8 on purpose: it is the newest runtime that ships *inside*
-      Windows 10 (1903 and later, which includes LTSC 2021 / build 19044), so the
-      executable stays a couple of hundred KB and needs no runtime install.
+      .NET Framework 4.8 on purpose: it ships *inside* our minimum target,
+      Windows 10 LTSC 2021 / build 19044, so the executable stays a couple of
+      hundred KB and needs no runtime install.
       No version of modern .NET (5 through 10) is part of Windows, which is why a
       .NET 10 build either needs a runtime install or a ~47 MB self contained exe.
       4.8.1 is not an option: it is only in-box on Windows 11 22H2 and later.
