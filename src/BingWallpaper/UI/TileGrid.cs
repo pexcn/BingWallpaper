@@ -126,6 +126,49 @@ internal sealed class TileGrid : ScrollableControl
     private int _focused = -1;
     private int _windowFirst = -1;
     private int _windowCount;
+    private PaintResources? _paintResources;
+
+    private sealed class PaintResources : IDisposable
+    {
+        public PaintResources(ThemePalette palette)
+        {
+            Palette = palette;
+            Border = new Pen(palette.Border, Math.Max(1, DpiScale.Round(1)));
+            Accent = new Pen(palette.Accent, Math.Max(2, DpiScale.Round(2)));
+            Focus = new Pen(palette.Accent) { DashStyle = DashStyle.Dot };
+            Placeholder = new SolidBrush(palette.ControlBackground);
+            Disc = new SolidBrush(palette.Accent);
+            Mark = new SolidBrush(palette.GlyphMark);
+            PadlockBody = new GraphicsPath();
+            Shackle = new Pen(palette.GlyphMark, Math.Max(1f, 1.8f * DpiScale.Round(20) / 20f))
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+            };
+        }
+
+        public ThemePalette Palette { get; }
+        public Pen Border { get; }
+        public Pen Accent { get; }
+        public Pen Focus { get; }
+        public SolidBrush Placeholder { get; }
+        public SolidBrush Disc { get; }
+        public SolidBrush Mark { get; }
+        public GraphicsPath PadlockBody { get; }
+        public Pen Shackle { get; }
+
+        public void Dispose()
+        {
+            Border.Dispose();
+            Accent.Dispose();
+            Focus.Dispose();
+            Placeholder.Dispose();
+            Disc.Dispose();
+            Mark.Dispose();
+            PadlockBody.Dispose();
+            Shackle.Dispose();
+        }
+    }
 
     public TileGrid()
     {
@@ -170,7 +213,7 @@ internal sealed class TileGrid : ScrollableControl
     /// last line of every tile - harmless between rows, but the bottom row hands it
     /// to the window as a margin visibly wider than the one above the first row.
     /// </summary>
-    public int TileHeight => PictureHeight + DpiScale.Round(CaptionGap) + (Font.Height * 2);
+    public int TileHeight => PictureHeight + DpiScale.Round(CaptionGap) + (FontHeight * 2);
 
     /// <summary>Device pixel height of the 16:9 picture at the top of a tile.</summary>
     private static int PictureHeight => DpiScale.Round(TileWidth) * 9 / 16;
@@ -287,6 +330,8 @@ internal sealed class TileGrid : ScrollableControl
         if (disposing)
         {
             ThemeManager.ThemeChanged -= OnThemeChanged;
+            _paintResources?.Dispose();
+            _paintResources = null;
             if (_source is not null)
             {
                 _source.TileChanged -= OnTileChanged;
@@ -297,7 +342,13 @@ internal sealed class TileGrid : ScrollableControl
         base.Dispose(disposing);
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e) => ApplyScrollBarTheme();
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        _paintResources?.Dispose();
+        _paintResources = null;
+        ApplyScrollBarTheme();
+        Invalidate();
+    }
 
     private void ApplyScrollBarTheme()
     {
@@ -488,26 +539,33 @@ internal sealed class TileGrid : ScrollableControl
         // not look at the GDI+ transform unless every call opts in - so a scrolled
         // grid would paint its pictures in one place and its captions in another.
         Point origin = AutoScrollPosition;
+        if (_paintResources is not null && !ReferenceEquals(_paintResources.Palette, palette))
+        {
+            _paintResources.Dispose();
+            _paintResources = null;
+        }
+
+        PaintResources resources = _paintResources ??= new PaintResources(palette);
 
         GetVisibleRange(out int first, out int last);
         for (int i = first; i <= last; i++)
         {
             Rectangle bounds = GetTileBounds(i);
             bounds.Offset(origin);
-            PaintTile(g, palette, i, bounds, source.GetInfo(i));
+            PaintTile(g, palette, resources, i, bounds, source.GetInfo(i));
         }
     }
 
-    private void PaintTile(Graphics g, ThemePalette palette, int index, Rectangle bounds, TileInfo info)
+    private void PaintTile(Graphics g, ThemePalette palette, PaintResources resources, int index, Rectangle bounds, TileInfo info)
     {
-        int lineHeight = Font.Height;
+        int lineHeight = FontHeight;
         Rectangle picture = new Rectangle(bounds.X, bounds.Y, bounds.Width, PictureHeight);
         int textTop = picture.Bottom + DpiScale.Round(CaptionGap);
 
-        PaintPicture(g, palette, picture, info);
-        PaintFrame(g, palette, picture, index, info);
+        PaintPicture(g, palette, resources, picture, info);
+        PaintFrame(g, resources, picture, index, info);
 
-        PaintMarks(g, palette, picture, info);
+        PaintMarks(g, resources, picture, info);
 
         TextRenderer.DrawText(
             g,
@@ -530,19 +588,15 @@ internal sealed class TileGrid : ScrollableControl
         // focus when the window opens should not be ringed.
         if (index == _focused && Focused && ShowFocusCues)
         {
-            using Pen focus = new Pen(palette.Accent) { DashStyle = DashStyle.Dot };
-            g.DrawRectangle(focus, bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
+            g.DrawRectangle(resources.Focus, bounds.X, bounds.Y, bounds.Width - 1, bounds.Height - 1);
         }
     }
 
-    private void PaintPicture(Graphics g, ThemePalette palette, Rectangle picture, TileInfo info)
+    private void PaintPicture(Graphics g, ThemePalette palette, PaintResources resources, Rectangle picture, TileInfo info)
     {
         if (info.Thumbnail is null)
         {
-            using (SolidBrush placeholder = new SolidBrush(palette.ControlBackground))
-            {
-                g.FillRectangle(placeholder, picture);
-            }
+            g.FillRectangle(resources.Placeholder, picture);
 
             TextRenderer.DrawText(
                 g,
@@ -565,17 +619,16 @@ internal sealed class TileGrid : ScrollableControl
         g.InterpolationMode = InterpolationMode.Default;
     }
 
-    private void PaintFrame(Graphics g, ThemePalette palette, Rectangle picture, int index, TileInfo info)
+    private void PaintFrame(Graphics g, PaintResources resources, Rectangle picture, int index, TileInfo info)
     {
         // No anti aliasing on purpose - see ThemedComboBox for what it does to the
         // corner pixels of a one pixel rectangle. Hover and "current" share one
         // emphasised frame; the corner mark is what keeps the two states apart.
         bool emphasised = index == _hovered || info.Mark != TileMark.None;
-        Color colour = emphasised ? palette.Accent : palette.Border;
+        Pen pen = emphasised ? resources.Accent : resources.Border;
         int width = emphasised ? Math.Max(2, DpiScale.Round(2)) : Math.Max(1, DpiScale.Round(1));
         int inset = width / 2;
 
-        using Pen pen = new Pen(colour, width);
         g.DrawRectangle(
             pen,
             picture.Left + inset,
@@ -591,7 +644,7 @@ internal sealed class TileGrid : ScrollableControl
     /// anything sitting beside one would land on a different x on every tile; equal
     /// discs make the corner a predictable row.
     /// </summary>
-    private static void PaintMarks(Graphics g, ThemePalette palette, Rectangle picture, TileInfo info)
+    private static void PaintMarks(Graphics g, PaintResources resources, Rectangle picture, TileInfo info)
     {
         if (info.Mark == TileMark.None && !info.Starred)
         {
@@ -606,33 +659,28 @@ internal sealed class TileGrid : ScrollableControl
 
         SmoothingMode previous = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-
-        using (SolidBrush disc = new SolidBrush(palette.Accent))
-        using (SolidBrush mark = new SolidBrush(palette.GlyphMark))
+        if (info.Mark != TileMark.None)
         {
-            if (info.Mark != TileMark.None)
+            Rectangle bounds = new Rectangle(x, y, size, size);
+            g.FillEllipse(resources.Disc, bounds);
+
+            if (info.Mark == TileMark.Pinned)
             {
-                Rectangle bounds = new Rectangle(x, y, size, size);
-                g.FillEllipse(disc, bounds);
-
-                if (info.Mark == TileMark.Pinned)
-                {
-                    PaintPadlock(g, mark, palette.GlyphMark, bounds);
-                }
-                else
-                {
-                    PaintDot(g, mark, bounds);
-                }
-
-                x -= size + gap;
+                PaintPadlock(g, resources, bounds);
+            }
+            else
+            {
+                PaintDot(g, resources.Mark, bounds);
             }
 
-            if (info.Starred)
-            {
-                Rectangle bounds = new Rectangle(x, y, size, size);
-                g.FillEllipse(disc, bounds);
-                g.FillPolygon(mark, BuildStar(bounds), FillMode.Winding);
-            }
+            x -= size + gap;
+        }
+
+        if (info.Starred)
+        {
+            Rectangle bounds = new Rectangle(x, y, size, size);
+            g.FillEllipse(resources.Disc, bounds);
+            g.FillPolygon(resources.Mark, BuildStar(bounds), FillMode.Winding);
         }
 
         g.SmoothingMode = previous;
@@ -644,7 +692,7 @@ internal sealed class TileGrid : ScrollableControl
     /// Drawn by hand rather than shipped as an icon: a shackle arc over a rounded body,
     /// laid out on a 20 unit grid so it scales with whatever the DPI made of the disc.
     /// </summary>
-    private static void PaintPadlock(Graphics g, Brush mark, Color colour, Rectangle bounds)
+    private static void PaintPadlock(Graphics g, PaintResources resources, Rectangle bounds)
     {
         float unit = bounds.Width / 20f;
         float centreX = bounds.X + (bounds.Width / 2f);
@@ -657,26 +705,20 @@ internal sealed class TileGrid : ScrollableControl
         // measured to the middle reads as sitting low. Optical centre over geometric.
         float bodyTop = bounds.Y + (8f * unit);
 
-        using (GraphicsPath body = new GraphicsPath())
-        {
-            RectangleF box = new RectangleF(centreX - (bodyWidth / 2f), bodyTop, bodyWidth, bodyHeight);
-            body.AddArc(box.Left, box.Top, radius, radius, 180, 90);
-            body.AddArc(box.Right - radius, box.Top, radius, radius, 270, 90);
-            body.AddArc(box.Right - radius, box.Bottom - radius, radius, radius, 0, 90);
-            body.AddArc(box.Left, box.Bottom - radius, radius, radius, 90, 90);
-            body.CloseFigure();
-            g.FillPath(mark, body);
-        }
+        GraphicsPath body = resources.PadlockBody;
+        body.Reset();
+        RectangleF box = new RectangleF(centreX - (bodyWidth / 2f), bodyTop, bodyWidth, bodyHeight);
+        body.AddArc(box.Left, box.Top, radius, radius, 180, 90);
+        body.AddArc(box.Right - radius, box.Top, radius, radius, 270, 90);
+        body.AddArc(box.Right - radius, box.Bottom - radius, radius, radius, 0, 90);
+        body.AddArc(box.Left, box.Bottom - radius, radius, radius, 90, 90);
+        body.CloseFigure();
+        g.FillPath(resources.Mark, body);
 
         // The arc ends exactly on the top edge of the body, so the two shapes meet
         // without a seam and the shackle needs no separate legs.
         float shackle = 3.2f * unit;
-        using Pen pen = new Pen(colour, Math.Max(1f, 1.8f * unit))
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-        };
-        g.DrawArc(pen, centreX - shackle, bodyTop - shackle, shackle * 2f, shackle * 2f, 180, 180);
+        g.DrawArc(resources.Shackle, centreX - shackle, bodyTop - shackle, shackle * 2f, shackle * 2f, 180, 180);
     }
 
     /// <summary>

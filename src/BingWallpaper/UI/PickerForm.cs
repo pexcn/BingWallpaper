@@ -65,6 +65,7 @@ internal sealed class PickerForm : Form
     private const int TransientStatusMilliseconds = 5000;
 
     private readonly TrayContext _context;
+    private readonly Font? _systemFont;
 
     /// <summary>Holds the tab strip and, at its right edge, the rotation switch.</summary>
     private readonly Panel _header = new Panel();
@@ -114,7 +115,7 @@ internal sealed class PickerForm : Form
     {
         _context = context;
 
-        ThemeManager.ApplySystemFont(this);
+        _systemFont = ThemeManager.ApplySystemFont(this);
 
         Text = "选择壁纸";
         // Windows Forms does not inherit the icon of the executable: without this the
@@ -283,6 +284,10 @@ internal sealed class PickerForm : Form
         }
 
         base.Dispose(disposing);
+        if (disposing)
+        {
+            _systemFont?.Dispose();
+        }
     }
 
     /// <summary>Shows the given metadata; fetches it when the caller has none yet.</summary>

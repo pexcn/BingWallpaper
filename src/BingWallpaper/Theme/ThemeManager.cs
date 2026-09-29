@@ -115,20 +115,32 @@ internal static class ThemeManager
     /// Applies the real Windows UI font. .NET Framework still defaults controls to
     /// MS Sans Serif 8.25pt, which looks dated and measures differently from the
     /// font the rest of the system uses (Segoe UI / Microsoft YaHei UI 9pt).
+    /// The caller owns the returned font until the control has been disposed.
     /// </summary>
-    public static void ApplySystemFont(Control control)
+    public static Font? ApplySystemFont(Control control)
     {
+        Font? font = null;
+        bool assigned = false;
         try
         {
-            Font? font = SystemFonts.MessageBoxFont;
+            font = SystemFonts.MessageBoxFont;
             if (font is not null)
             {
+                assigned = true;
                 control.Font = font;
             }
+
+            return font;
         }
         catch (Exception ex)
         {
+            if (!assigned)
+            {
+                font?.Dispose();
+            }
+
             Logger.Warn("theme: applying the system ui font failed error=" + ex.Message);
+            return assigned ? font : null;
         }
     }
 

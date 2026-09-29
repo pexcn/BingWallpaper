@@ -59,6 +59,7 @@ internal sealed class SettingsForm : Form
     };
 
     private readonly AppConfig _config;
+    private readonly Font? _systemFont;
 
     private readonly ThemedComboBox _marketBox = new();
     private readonly ThemedRadioButton _resolution4K = new("4K");
@@ -95,7 +96,7 @@ internal sealed class SettingsForm : Form
     {
         _config = config;
 
-        ThemeManager.ApplySystemFont(this);
+        _systemFont = ThemeManager.ApplySystemFont(this);
 
         Text = "设置";
         Icon = AppIcon.Window;
@@ -195,6 +196,10 @@ internal sealed class SettingsForm : Form
         }
 
         base.Dispose(disposing);
+        if (disposing)
+        {
+            _systemFont?.Dispose();
+        }
     }
 
     /// <summary>

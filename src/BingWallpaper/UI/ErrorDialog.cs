@@ -16,8 +16,10 @@ internal static class ErrorDialog
 
     public static void Show(string title, string details)
     {
+        Font? systemFont = null;
         try
         {
+            using Font monoFont = new Font(FontFamily.GenericMonospace, 9f);
             using Form form = new Form()
             {
                 Text = title,
@@ -31,7 +33,7 @@ internal static class ErrorDialog
                 TopMost = true,
             };
 
-            ThemeManager.ApplySystemFont(form);
+            systemFont = ThemeManager.ApplySystemFont(form);
 
             TextBox text = new TextBox()
             {
@@ -41,7 +43,7 @@ internal static class ErrorDialog
                 WordWrap = false,
                 Dock = DockStyle.Fill,
                 Text = NormalizeLineEndings(details),
-                Font = new Font(FontFamily.GenericMonospace, 9f),
+                Font = monoFont,
             };
 
             Panel buttons = new Panel()
@@ -110,6 +112,10 @@ internal static class ErrorDialog
             {
                 // Give up quietly - the log still has the original error.
             }
+        }
+        finally
+        {
+            systemFont?.Dispose();
         }
     }
 }

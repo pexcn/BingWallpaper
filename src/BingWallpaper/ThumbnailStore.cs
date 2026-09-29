@@ -27,7 +27,7 @@ namespace BingWallpaper;
 /// not latency bound.
 /// </para>
 /// <para>
-/// The pending list is *replaced* rather than appended to: every scroll hands over the
+/// The pending queue is *replaced* rather than appended to: every scroll hands over the
 /// range that is on screen now, and whatever was queued for a range the user has
 /// already scrolled past is dropped on the spot. That is what keeps a fast scroll from
 /// spending the next minute rendering the five hundred pictures nobody is looking at
@@ -78,7 +78,7 @@ internal sealed class ThumbnailStore : IDisposable
     }
 
     private readonly object _sync = new object();
-    private readonly List<string> _pending = new List<string>();
+    private readonly Queue<string> _pending = new Queue<string>();
     private readonly AutoResetEvent _signal = new AutoResetEvent(false);
 
     /// <summary>UI thread only. A null value marks a picture that would not decode.</summary>
@@ -146,7 +146,10 @@ internal sealed class ThumbnailStore : IDisposable
             _pending.Clear();
             if (work is not null)
             {
-                _pending.AddRange(work);
+                foreach (string name in work)
+                {
+                    _pending.Enqueue(name);
+                }
             }
         }
 
@@ -480,11 +483,9 @@ internal sealed class ThumbnailStore : IDisposable
                 return null;
             }
 
-            // From the front: the list is handed over in the order the tiles appear,
+            // From the front: the queue is handed over in the order the tiles appear,
             // so the top of the viewport fills in first.
-            string name = _pending[0];
-            _pending.RemoveAt(0);
-            return name;
+            return _pending.Dequeue();
         }
     }
 

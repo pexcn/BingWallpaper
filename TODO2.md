@@ -6,13 +6,14 @@
 > 2026-09-20 第四次复核：修正第 1、20 条描述；新增推荐修复批次。
 > 2026-09-28：第一批（1、4）已修复，从列表移除；其余编号保持不变。
 > 2026-09-28：壁纸应用结果与托盘状态（2、3）已修复，从列表移除。
+> 2026-09-28：WinForms 热路径与 GDI 资源（16、18、20、22）已修复，从列表移除。
 > 行号为记录问题时的源码行号，后续改动可能使其漂移，以方法名为准。
 
 ---
 
 ## 推荐修复批次
 
-剩余建议分 **7 批**，按共同状态机、数据生命周期和资源所有权划分。每批完成后单独构建和验证，
+剩余建议分 **6 批**，按共同状态机、数据生命周期和资源所有权划分。每批完成后单独构建和验证，
 避免一次改动横跨太多控制面。
 
 1. **设置持久化与强类型选项**：5、14。都集中在 `SettingsForm` 的“控件值 → 配置值 → 落盘”链路，可一起补回滚并消除 `SelectedIndex` 对枚举数值的隐式依赖。
@@ -21,7 +22,6 @@
 4. **日志可靠性与写入性能**：10、19。先保证异常描述器不会递归失控，再引入进程级 writer、长度计数和可靠关闭；两项共同影响故障路径，不宜拆开验证。
 5. **启动探测与平台契约**：11、12、13。复用启动时的可写探测结果，并一次性统一 manifest、项目注释和 README 的 DPI / 最低系统版本表述。
 6. **周期性目录与路径工作**：15、21。都在 `TrayContext` 的周期路径上：复用保护文件集合，并把收藏目录扫描移到忙碌守卫之后。
-7. **WinForms 热路径与 GDI 资源**：16、18、20、22。统一处理布局测量、绘制资源、待办队列和字体所有权；其中 20 当前影响很低，可作为同批顺手清理，不值得单独改一批。
 
 ---
 
@@ -125,22 +125,6 @@ README 写「Windows 10 1903 (build 18362) 及以上」，而 `DWMWA_USE_IMMERSI
 
 ## P1 · 热路径性能（2026-09-06 新增）
 
-### [ ] 16. `TileGrid` 每量一次行高就问一次屏幕 DC
-
-`UI/TileGrid.cs:170` `TileHeight`（`Font.Height`）、`161` `CellHeight`、`486` `PaintTile`
-
-`System.Drawing.Font.Height` 不是缓存值：每次读都会 `GetDC(NULL)` + 建一个 `Graphics` +
-`GdipGetFontHeight` + `ReleaseDC`。而 `TileHeight` 被 `CellHeight`、`GetTileBounds`、
-`GetVisibleRange`、`HitTest`、`PaintTile` 层层调用：
-
-- 一次 `OnPaint`：每块磁贴 3 次，8 块可见就是 25 次；
-- 每条 `WM_MOUSEMOVE`：`HitTest` 3 次，移过磁贴边界再加 4 次（两次 `InvalidateTile`）。
-
-鼠标在收藏页上划一下，一秒钟上百次屏幕 DC 往返，滚动时更明显——这正是 LTSC 老机器最吃亏的地方。
-
-改法：把 `TileHeight` / `CellHeight` 存进字段，`OnFontChanged` 时作废；或改用 `Control.FontHeight`
-（WinForms 自己就是为这个缓存的）。
-
 ### [ ] 17. `BingImageInfo.ImageId` 每次读都重新解析一遍
 
 `BingImageInfo.cs:49`
@@ -151,16 +135,6 @@ README 写「Windows 10 1903 (build 18362) 及以上」，而 `DWMWA_USE_IMMERSI
 （`ApplyFavoriteCoreAsync:1384`）都要走一次。`UrlBase` 一旦从 JSON 填好就不再变。
 
 改法：解析一次存字段（`UrlBase` 的 setter 里算，或懒加载缓存）。
-
-### [ ] 18. 磁贴绘制每块都新建 GDI+ 对象
-
-`UI/TileGrid.cs:516`（Pen）、`525`（SolidBrush）、`561`（Pen）、`593-594`（两个 SolidBrush）、
-`643`（GraphicsPath）、`657`（Pen）
-
-每块磁贴每次重绘至少一支 `Pen`，带角标的再加两支 `SolidBrush`，锁定角标还要一条 `GraphicsPath`
-和一支 `Pen`。收藏夹几百张时快速滚轮，一秒钟就是几千个带终结器的 GDI+ 对象。
-
-改法：调色板只有两套、颜色固定，可以把常用的 Pen/Brush 缓存在控件字段里，`ThemeChanged` 时重建。
 
 ### [ ] 19. 每行日志都开关一次文件
 
@@ -173,16 +147,6 @@ README 写「Windows 10 1903 (build 18362) 及以上」，而 `DWMWA_USE_IMMERSI
 改法：进程内保留一个打开的 `StreamWriter`（`AutoFlush` 或按批 flush），长度自己累加计数，
 不必每行 stat。
 
-### [ ] 20. `ThumbnailStore` 仍从列表头部出队，但实际队列很短
-
-`ThumbnailStore.cs:413` `TakeNext`（`425` 行 `RemoveAt(0)`）
-
-`List<string>` 上 `RemoveAt(0)` 每次都要整体前移，取完 n 项就是 O(n²)。问题仍存在，但性能影响远小于
-原描述：当前固定 4 列 × 2 行，预取范围只有可见区上下各一行，待办通常不超过约 16~20 项，缓存命中的
-项目还不会入队。因此这是低优先级的确定性小优化，不是高分屏下会放大到上百项的热点。
-
-改法：换 `Queue<string>`，保持整批替换和按屏幕顺序处理的语义不变；或用游标下标避免移动元素。
-
 ### [ ] 21. `StepShuffle` 在忙碌判断之前就全量扫目录
 
 `UI/TrayContext.cs:1155`
@@ -193,21 +157,4 @@ README 写「Windows 10 1903 (build 18362) 及以上」，而 `DWMWA_USE_IMMERSI
 
 改法：先过 `_busy` / `_applyingFavorite` 守卫再 `Sync`；或让 `Sync` 接受一个懒枚举。
 
----
 
-## P2 · 资源句柄（2026-09-06 新增）
-
-### [ ] 22. 每开一个窗口漏一个 `Font`
-
-`Theme/ThemeManager.cs:123` `ApplySystemFont`、`UI/ErrorDialog.cs:44`
-
-`SystemFonts.MessageBoxFont` 每次读都返回**新的** `Font`（文档明确要求调用方 Dispose），
-而 `ApplySystemFont` 只是 `control.Font = font` 就撒手；`Control.Dispose` 从不释放外部赋给它的
-字体。`ErrorDialog` 里的 `new Font(FontFamily.GenericMonospace, 9f)` 同理。
-
-于是每开一次选择窗口 / 设置窗口 / 错误对话框，就多一个只能等终结器回收的 HFONT。
-`Font` 有终结器，所以不是永久泄漏，但 GDI 句柄是每进程上限受限的资源，回收时机又不确定——
-一个要跑几周的托盘程序不该把它交给 GC 决定。
-
-改法：`ApplySystemFont` 里换字体前 Dispose 掉自己上次设的那个（或全程序共用一个静态 `Font`）；
-`ErrorDialog` 用 `using` 管住等宽字体，在 `ShowDialog` 返回后释放。
