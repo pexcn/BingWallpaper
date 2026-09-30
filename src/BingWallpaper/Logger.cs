@@ -24,9 +24,12 @@ internal static class Logger
 
     private static readonly object Sync = new();
     private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+    private static readonly int NewLineBytes = Utf8NoBom.GetByteCount(Environment.NewLine);
 
     private static string? _filePath;
     private static bool _fileDisabled;
+    private static StreamWriter? _writer;
+    private static long _fileBytes;
 
     // Info by default: Debug carries platform probing details that would otherwise
     // flood the 512 KiB rotation window and push out the startup banner.
@@ -37,8 +40,18 @@ internal static class Logger
     {
         lock (Sync)
         {
+            CloseWriter();
             _filePath = filePath;
             _fileDisabled = string.IsNullOrEmpty(filePath);
+        }
+    }
+
+    public static void Shutdown()
+    {
+        lock (Sync)
+        {
+            _fileDisabled = true;
+            CloseWriter();
         }
     }
 
@@ -79,7 +92,12 @@ internal static class Logger
         }
 
         StringBuilder sb = new StringBuilder();
-        int depth = 0;
+        AppendException(sb, ex, 0);
+        return sb.ToString().TrimEnd();
+    }
+
+    private static void AppendException(StringBuilder sb, Exception ex, int depth)
+    {
         Exception? current = ex;
         while (current is not null && depth < 10)
         {
@@ -96,8 +114,13 @@ internal static class Logger
             {
                 foreach (Exception item in aggregate.InnerExceptions)
                 {
+                    if (depth + 1 >= 10)
+                    {
+                        break;
+                    }
+
                     sb.AppendLine("--- aggregated ---");
-                    sb.AppendLine(Describe(item));
+                    AppendException(sb, item, depth + 1);
                 }
 
                 break;
@@ -106,8 +129,6 @@ internal static class Logger
             current = current.InnerException;
             depth++;
         }
-
-        return sb.ToString().TrimEnd();
     }
 
     private static void Write(LogLevel level, string message)
@@ -129,26 +150,66 @@ internal static class Logger
 
             try
             {
-                RotateIfNeeded(_filePath);
-                File.AppendAllText(_filePath, line + Environment.NewLine, Utf8NoBom);
+                EnsureWriter(_filePath);
+                if (_fileBytes >= MaxFileBytes)
+                {
+                    CloseWriter();
+                    Rotate(_filePath);
+                    EnsureWriter(_filePath);
+                }
+
+                _writer!.WriteLine(line);
+                _fileBytes += Utf8NoBom.GetByteCount(line) + NewLineBytes;
             }
             catch
             {
                 // Logging must never take the application down. Disable the file
                 // sink after the first failure so we do not retry on every line.
                 _fileDisabled = true;
+                CloseWriter();
             }
         }
     }
 
-    private static void RotateIfNeeded(string path)
+    private static void EnsureWriter(string path)
     {
-        FileInfo info = new FileInfo(path);
-        if (!info.Exists || info.Length < MaxFileBytes)
+        if (_writer is not null)
         {
             return;
         }
 
+        // Readers may inspect the log, but another writer must not invalidate
+        // the byte count or interfere with rotation.
+        FileStream stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+        try
+        {
+            _fileBytes = stream.Seek(0, SeekOrigin.End);
+            _writer = new StreamWriter(stream, Utf8NoBom) { AutoFlush = true };
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    private static void CloseWriter()
+    {
+        StreamWriter? writer = _writer;
+        _writer = null;
+        try
+        {
+            writer?.Dispose();
+        }
+        catch
+        {
+            // AutoFlush already wrote completed lines; a failed close must
+            // not mask an application error or prevent shutdown.
+        }
+    }
+
+    private static void Rotate(string path)
+    {
         string backup = path + ".1";
         if (File.Exists(backup))
         {

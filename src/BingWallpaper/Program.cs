@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -45,6 +46,7 @@ internal static class Program
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += OnThreadException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         Application.EnableVisualStyles();
@@ -66,22 +68,17 @@ internal static class Program
             return 2;
         }
 
-        Logger.Initialize(Paths.LogFile);
-
-        // A second launch does nothing beyond saying so here. It used to signal the
-        // running instance to open its settings window, which left double clicking an
-        // icon meaning one thing on the tray - the picker - and another on the
-        // shortcut, with nothing on screen hinting at either. The tray icon is the way
-        // back into an instance that is already running.
-        //
-        // It still writes the environment line, whose dir= is how a stray second copy
-        // launched from another folder gives itself away, but the separator below stays
-        // out of its way: that one marks a run, and this process never became one.
-        if (!TryBecomePrimaryInstance())
+        // Only the primary instance owns the log writer. A duplicate launch
+        // must not open the same file while the primary is appending or rotating.
+        if (!TryBecomePrimaryInstance(out List<string> instanceWarnings))
         {
-            LogEnvironment(writable, writeError);
-            Logger.Info("startup: another instance is already running, exiting");
             return 0;
+        }
+
+        Logger.Initialize(Paths.LogFile);
+        foreach (string warning in instanceWarnings)
+        {
+            Logger.Warn(warning);
         }
 
         // The only decorative line in the log, and only because a process boundary is
@@ -130,6 +127,7 @@ internal static class Program
         }
         finally
         {
+            Logger.Shutdown();
             ReleaseSingleInstance();
         }
     }
@@ -139,8 +137,9 @@ internal static class Program
     /// SeCreateGlobalPrivilege, which a standard user does not have, so the Local
     /// namespace is used as a fallback.
     /// </summary>
-    private static bool TryBecomePrimaryInstance()
+    private static bool TryBecomePrimaryInstance(out List<string> warnings)
     {
+        warnings = new List<string>();
         foreach (string prefix in new[] { @"Global\", @"Local\" })
         {
             try
@@ -154,19 +153,18 @@ internal static class Program
                 }
 
                 _instanceMutex = mutex;
-                Logger.Debug("singleinstance: namespace=" + prefix.TrimEnd('\\'));
                 return true;
             }
             catch (Exception ex)
             {
-                Logger.Warn(
+                warnings.Add(
                     "singleinstance: create failed namespace=" + prefix.TrimEnd('\\') +
                     " error=" + ex.GetType().Name + ": " + ex.Message);
             }
         }
 
         // Fail open: running without the guard is better than not running at all.
-        Logger.Warn("singleinstance: continuing without a guard");
+        warnings.Add("singleinstance: continuing without a guard");
         return true;
     }
 
@@ -204,6 +202,11 @@ internal static class Program
     {
         Logger.Error("crash: unobserved task exception", e.Exception);
         e.SetObserved();
+    }
+
+    private static void OnProcessExit(object sender, EventArgs e)
+    {
+        Logger.Shutdown();
     }
 
 }
