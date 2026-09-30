@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using BingWallpaper.Theme;
@@ -275,7 +276,7 @@ internal sealed class SettingsForm : Form
 
         foreach (WallpaperFit fit in (WallpaperFit[])Enum.GetValues(typeof(WallpaperFit)))
         {
-            _fitBox.Items.Add(WallpaperService.GetFitDisplayName(fit));
+            _fitBox.Items.Add(new Choice<WallpaperFit>(fit, WallpaperService.GetFitDisplayName(fit)));
         }
 
         AddRow(fields, "填充方式", _fitBox);
@@ -287,7 +288,7 @@ internal sealed class SettingsForm : Form
         // and carrying the unit in the item text removes the separate hint label.
         foreach (int hours in new[] { 1, 2, 3, 4, 6, 8, 12, 24 })
         {
-            _intervalBox.Items.Add(new Choice(hours, FormatHours(hours)));
+            _intervalBox.Items.Add(new Choice<int>(hours, FormatHours(hours)));
         }
 
         AddRow(fields, "检查间隔", _intervalBox);
@@ -300,14 +301,14 @@ internal sealed class SettingsForm : Form
         // is always live: there is nothing left in this window for it to grey out with.
         foreach (int minutes in new[] { 1, 3, 5, 10, 15, 30, 60 })
         {
-            _shuffleIntervalBox.Items.Add(new Choice(minutes, FormatMinutes(minutes)));
+            _shuffleIntervalBox.Items.Add(new Choice<int>(minutes, FormatMinutes(minutes)));
         }
 
         AddRow(fields, "轮播间隔", _shuffleIntervalBox);
 
         foreach (int days in new[] { 0, 7, 14, 30, 60, 90, 180, 365 })
         {
-            _keepDaysBox.Items.Add(new Choice(days, FormatDays(days)));
+            _keepDaysBox.Items.Add(new Choice<int>(days, FormatDays(days)));
         }
 
         AddRow(fields, "保留天数", _keepDaysBox);
@@ -416,16 +417,16 @@ internal sealed class SettingsForm : Form
         return panel;
     }
 
-    /// <summary>One entry of a numeric drop down: the stored value plus its label.</summary>
-    private sealed class Choice
+    /// <summary>One drop down entry: the stored value plus its label.</summary>
+    private sealed class Choice<T>
     {
-        public Choice(int value, string text)
+        public Choice(T value, string text)
         {
             Value = value;
             Text = text;
         }
 
-        public int Value { get; }
+        public T Value { get; }
 
         public string Text { get; }
 
@@ -447,7 +448,7 @@ internal sealed class SettingsForm : Form
     {
         for (int i = 0; i < box.Items.Count; i++)
         {
-            if (box.Items[i] is Choice choice && choice.Value == value)
+            if (box.Items[i] is Choice<int> choice && choice.Value == value)
             {
                 box.SelectedIndex = i;
                 return;
@@ -456,56 +457,99 @@ internal sealed class SettingsForm : Form
 
         int index = 0;
         while (index < box.Items.Count
-               && box.Items[index] is Choice existing
+                             && box.Items[index] is Choice<int> existing
                && existing.Value < value)
         {
             index++;
         }
 
-        box.Items.Insert(index, new Choice(value, format(value)));
+        box.Items.Insert(index, new Choice<int>(value, format(value)));
         box.SelectedIndex = index;
     }
 
-    private static int GetValue(ComboBox box, int fallback)
-        => box.SelectedItem is Choice choice ? choice.Value : fallback;
+    private static T GetValue<T>(ComboBox box, T fallback)
+        => box.SelectedItem is Choice<T> choice ? choice.Value : fallback;
 
     private void LoadFromConfig()
+    {
+        foreach (SettingKind kind in (SettingKind[])Enum.GetValues(typeof(SettingKind)))
+        {
+            LoadSetting(kind);
+        }
+    }
+
+    private void LoadSetting(SettingKind kind)
     {
         _loading = true;
         try
         {
-            if (!_marketBox.Items.Contains(_config.Market))
+            switch (kind)
             {
-                // Market code set by hand in the INI file - keep it selectable.
-                _marketBox.Items.Add(_config.Market);
-            }
+                case SettingKind.Market:
+                    if (!_marketBox.Items.Contains(_config.Market))
+                    {
+                        // Market code set by hand in the INI file - keep it selectable.
+                        _marketBox.Items.Add(_config.Market);
+                    }
 
-            _marketBox.SelectedItem = _config.Market;
-            _resolution4K.Checked = _config.Resolution == ResolutionKind.Uhd;
-            _resolution1080.Checked = _config.Resolution == ResolutionKind.FullHd;
-            _fitBox.SelectedIndex = (int)_config.Fit;
-            _themeSystem.Checked = _config.Theme == ThemeMode.System;
-            _themeLight.Checked = _config.Theme == ThemeMode.Light;
-            _themeDark.Checked = _config.Theme == ThemeMode.Dark;
-            SelectValue(
-                _intervalBox,
-                AppConfig.Clamp(
-                    _config.RefreshIntervalHours,
-                    AppConfig.MinRefreshIntervalHours,
-                    AppConfig.MaxRefreshIntervalHours),
-                FormatHours);
-            SelectValue(
-                _shuffleIntervalBox,
-                AppConfig.Clamp(
-                    _config.ShuffleIntervalMinutes,
-                    AppConfig.MinShuffleIntervalMinutes,
-                    AppConfig.MaxShuffleIntervalMinutes),
-                FormatMinutes);
-            SelectValue(
-                _keepDaysBox,
-                AppConfig.Clamp(_config.KeepDays, 0, AppConfig.MaxKeepDays),
-                FormatDays);
-            _startupBox.Checked = _config.RunAtStartup;
+                    _marketBox.SelectedItem = _config.Market;
+                    break;
+
+                case SettingKind.Resolution:
+                    _resolution4K.Checked = _config.Resolution == ResolutionKind.Uhd;
+                    _resolution1080.Checked = _config.Resolution == ResolutionKind.FullHd;
+                    break;
+
+                case SettingKind.Fit:
+                    _fitBox.SelectedIndex = -1;
+                    foreach (Choice<WallpaperFit> choice in _fitBox.Items)
+                    {
+                        if (choice.Value == _config.Fit)
+                        {
+                            _fitBox.SelectedItem = choice;
+                            break;
+                        }
+                    }
+
+                    break;
+
+                case SettingKind.Theme:
+                    _themeSystem.Checked = _config.Theme == ThemeMode.System;
+                    _themeLight.Checked = _config.Theme == ThemeMode.Light;
+                    _themeDark.Checked = _config.Theme == ThemeMode.Dark;
+                    break;
+
+                case SettingKind.Interval:
+                    SelectValue(
+                        _intervalBox,
+                        AppConfig.Clamp(
+                            _config.RefreshIntervalHours,
+                            AppConfig.MinRefreshIntervalHours,
+                            AppConfig.MaxRefreshIntervalHours),
+                        FormatHours);
+                    break;
+
+                case SettingKind.ShuffleInterval:
+                    SelectValue(
+                        _shuffleIntervalBox,
+                        AppConfig.Clamp(
+                            _config.ShuffleIntervalMinutes,
+                            AppConfig.MinShuffleIntervalMinutes,
+                            AppConfig.MaxShuffleIntervalMinutes),
+                        FormatMinutes);
+                    break;
+
+                case SettingKind.KeepDays:
+                    SelectValue(
+                        _keepDaysBox,
+                        AppConfig.Clamp(_config.KeepDays, 0, AppConfig.MaxKeepDays),
+                        FormatDays);
+                    break;
+
+                case SettingKind.RunAtStartup:
+                    _startupBox.Checked = _config.RunAtStartup;
+                    break;
+            }
         }
         finally
         {
@@ -524,12 +568,11 @@ internal sealed class SettingsForm : Form
 
         _fitBox.SelectedIndexChanged += (_, _) =>
         {
-            if (_loading || _fitBox.SelectedIndex < 0 || _config.Fit == (WallpaperFit)_fitBox.SelectedIndex)
+            if (_loading || _fitBox.SelectedItem is not Choice<WallpaperFit>)
             {
                 return;
             }
 
-            _config.Fit = (WallpaperFit)_fitBox.SelectedIndex;
             PersistDeferred(SettingKind.Fit);
         };
 
@@ -539,37 +582,31 @@ internal sealed class SettingsForm : Form
 
         _intervalBox.SelectedIndexChanged += (_, _) =>
         {
-            int hours = GetValue(_intervalBox, _config.RefreshIntervalHours);
-            if (_loading || _config.RefreshIntervalHours == hours)
+            if (_loading)
             {
                 return;
             }
 
-            _config.RefreshIntervalHours = hours;
             PersistDeferred(SettingKind.Interval);
         };
 
         _shuffleIntervalBox.SelectedIndexChanged += (_, _) =>
         {
-            int minutes = GetValue(_shuffleIntervalBox, _config.ShuffleIntervalMinutes);
-            if (_loading || _config.ShuffleIntervalMinutes == minutes)
+            if (_loading)
             {
                 return;
             }
 
-            _config.ShuffleIntervalMinutes = minutes;
             PersistDeferred(SettingKind.ShuffleInterval);
         };
 
         _keepDaysBox.SelectedIndexChanged += (_, _) =>
         {
-            int days = GetValue(_keepDaysBox, _config.KeepDays);
-            if (_loading || _config.KeepDays == days)
+            if (_loading)
             {
                 return;
             }
 
-            _config.KeepDays = days;
             PersistDeferred(SettingKind.KeepDays);
         };
 
@@ -580,7 +617,6 @@ internal sealed class SettingsForm : Form
                 return;
             }
 
-            _config.RunAtStartup = _startupBox.Checked;
             Persist(SettingKind.RunAtStartup);
         };
 
@@ -594,7 +630,6 @@ internal sealed class SettingsForm : Form
             return;
         }
 
-        _config.Resolution = resolution;
         Persist(SettingKind.Resolution);
     }
 
@@ -605,29 +640,22 @@ internal sealed class SettingsForm : Form
             return;
         }
 
-        _config.Theme = mode;
         Persist(SettingKind.Theme);
     }
 
     private void CommitMarket()
     {
-        if (_loading || !(_marketBox.SelectedItem is string market))
+        if (_loading || _marketBox.SelectedItem is not string)
         {
             return;
         }
 
-        if (string.Equals(market, _config.Market, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        _config.Market = market;
         PersistDeferred(SettingKind.Market);
     }
 
     /// <summary>
-    /// Arms <see cref="_commitTimer"/> for a change a drop down has already written to
-    /// <see cref="_config"/> in memory. Restarting the timer is what collapses a burst:
+    /// Arms <see cref="_commitTimer"/> for a change held only in the drop down until
+    /// it is committed. Restarting the timer is what collapses a burst:
     /// only the entry the selection came to rest on gets as far as the INI file.
     ///
     /// <para>
@@ -670,9 +698,8 @@ internal sealed class SettingsForm : Form
 
     private void Persist(SettingKind kind)
     {
-        // Anything committed straight away supersedes a deferred change of another
-        // setting: writing this one first would put the two into the INI file in the
-        // opposite order to the one they were made in.
+        // Commit the older selection before reading this setting's control value.
+        // Neither selection may leak into the other setting's save or rollback.
         if (_pendingKind is SettingKind pending && pending != kind)
         {
             FlushPendingCommit();
@@ -684,12 +711,70 @@ internal sealed class SettingsForm : Form
             _pendingKind = null;
         }
 
+        switch (kind)
+        {
+            case SettingKind.Market:
+                PersistValue(kind, _marketBox.SelectedItem as string ?? _config.Market,
+                    () => _config.Market, value => _config.Market = value);
+                break;
+
+            case SettingKind.Resolution:
+                PersistValue(kind, _resolution4K.Checked ? ResolutionKind.Uhd : ResolutionKind.FullHd,
+                    () => _config.Resolution, value => _config.Resolution = value);
+                break;
+
+            case SettingKind.Fit:
+                PersistValue(kind, GetValue(_fitBox, _config.Fit),
+                    () => _config.Fit, value => _config.Fit = value);
+                break;
+
+            case SettingKind.Theme:
+                PersistValue(kind, _themeSystem.Checked ? ThemeMode.System
+                    : _themeLight.Checked ? ThemeMode.Light : ThemeMode.Dark,
+                    () => _config.Theme, value => _config.Theme = value);
+                break;
+
+            case SettingKind.Interval:
+                PersistValue(kind, GetValue(_intervalBox, _config.RefreshIntervalHours),
+                    () => _config.RefreshIntervalHours, value => _config.RefreshIntervalHours = value);
+                break;
+
+            case SettingKind.ShuffleInterval:
+                PersistValue(kind, GetValue(_shuffleIntervalBox, _config.ShuffleIntervalMinutes),
+                    () => _config.ShuffleIntervalMinutes, value => _config.ShuffleIntervalMinutes = value);
+                break;
+
+            case SettingKind.KeepDays:
+                PersistValue(kind, GetValue(_keepDaysBox, _config.KeepDays),
+                    () => _config.KeepDays, value => _config.KeepDays = value);
+                break;
+
+            case SettingKind.RunAtStartup:
+                PersistValue(kind, _startupBox.Checked,
+                    () => _config.RunAtStartup, value => _config.RunAtStartup = value);
+                break;
+        }
+    }
+
+    private void PersistValue<T>(SettingKind kind, T value, Func<T> getValue, Action<T> setValue)
+    {
+        T previous = getValue();
+        if (EqualityComparer<T>.Default.Equals(previous, value))
+        {
+            return;
+        }
+
+        // Other writers share this configuration. Keep uncommitted selections out
+        // of it, and roll back only this setting so their changes remain intact.
+        setValue(value);
         try
         {
             _config.Save(Paths.ConfigFile);
         }
         catch (Exception ex)
         {
+            setValue(previous);
+            LoadSetting(kind);
             Logger.Error("settings: saving the configuration failed", ex);
             ErrorDialog.Show("保存设置失败", Logger.Describe(ex));
             return;
