@@ -95,6 +95,9 @@ internal sealed class PickerForm : Form
     private ContextMenu? _menu;
 
     private string _loadedSignature = string.Empty;
+    private string? _markedFileName;
+    private string _markedStartDate = string.Empty;
+    private string _markedImageId = string.Empty;
     private string _statusText = "正在加载…";
     private bool _titlesLoaded;
     private bool _busy;
@@ -371,9 +374,10 @@ internal sealed class PickerForm : Form
     /// does not re-download every thumbnail. Dates alone are not enough: two markets
     /// serve the same days with different photos and different titles, and a
     /// signature built from the range only would call that unchanged and leave the old
-    /// market on screen.
+    /// market on screen. Resolution also matters because the source caches file names
+    /// for favourite marks and file operations.
     /// </summary>
-    private static string BuildSignature(IReadOnlyList<BingImageInfo> images)
+    private string BuildSignature(IReadOnlyList<BingImageInfo> images)
     {
         if (images.Count == 0)
         {
@@ -381,6 +385,7 @@ internal sealed class PickerForm : Form
         }
 
         StringBuilder builder = new StringBuilder(images.Count * 48);
+        builder.Append(AppConfig.ResolutionToString(_context.Config.Resolution)).Append('\n');
         foreach (BingImageInfo image in images)
         {
             builder.Append(image.StartDate).Append('|')
@@ -691,6 +696,25 @@ internal sealed class PickerForm : Form
         return _context.IsPinned ? TileMark.Pinned : TileMark.Applied;
     }
 
+    /// <summary>Recent tiles represent dated images, not one particular resolution.</summary>
+    private TileMark GetMark(BingImageInfo image)
+    {
+        string? fileName = _context.AppliedFileName;
+        if (!string.Equals(_markedFileName, fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            _markedFileName = fileName;
+            BingImageInfo.TryParseFileName(fileName ?? string.Empty, out _markedStartDate, out _markedImageId);
+        }
+
+        if (!string.Equals(image.StartDate, _markedStartDate, StringComparison.Ordinal)
+            || !string.Equals(image.ImageId, _markedImageId, StringComparison.OrdinalIgnoreCase))
+        {
+            return TileMark.None;
+        }
+
+        return _context.IsPinned ? TileMark.Pinned : TileMark.Applied;
+    }
+
     /// <summary>Whether this picture is, as far as we know, the wallpaper on screen.</summary>
     private bool IsApplied(string fileName)
         => string.Equals(_context.AppliedFileName, fileName, StringComparison.OrdinalIgnoreCase);
@@ -949,7 +973,7 @@ internal sealed class PickerForm : Form
             new MenuItem("设为壁纸并锁定", (_, _) => StartApplyRecent(index)) { DefaultItem = true },
         };
 
-        AddUnpinItem(items, fileName);
+        AddUnpinItem(items, GetMark(image));
         items.Add(favorite);
         items.Add(link);
         return new ContextMenu(items.ToArray());
@@ -957,8 +981,8 @@ internal sealed class PickerForm : Form
 
     /// <summary>
     /// Adds the row that lifts the lock, and only on the tile that carries it: the
-    /// lock holds one file name, and the picture on the desktop is the only one it
-    /// can be.
+    /// recent tiles match the dated image across resolutions, while favourites match
+    /// the actual file on the desktop.
     ///
     /// <para>
     /// Right under the apply row it undoes, and never the default item - bold marks
@@ -967,9 +991,9 @@ internal sealed class PickerForm : Form
     /// the same thing and must not disagree about whether it can be switched.
     /// </para>
     /// </summary>
-    private void AddUnpinItem(List<MenuItem> items, string fileName)
+    private void AddUnpinItem(List<MenuItem> items, TileMark mark)
     {
-        if (GetMark(fileName) != TileMark.Pinned)
+        if (mark != TileMark.Pinned)
         {
             return;
         }
@@ -1000,7 +1024,7 @@ internal sealed class PickerForm : Form
             new MenuItem("设为壁纸并锁定", (_, _) => StartApplyFavorite(index)) { DefaultItem = true },
         };
 
-        AddUnpinItem(items, item.FileName);
+        AddUnpinItem(items, GetMark(item.FileName));
         items.Add(new MenuItem("打开文件所在位置", (_, _) => ShowInExplorer(path)));
 
         if (item.IsBingImage)
@@ -1206,7 +1230,7 @@ internal sealed class PickerForm : Form
             return new TileInfo(
                 image.DisplayDate,
                 image.DisplayTitle,
-                _owner.GetMark(fileName),
+                _owner.GetMark(image),
                 _owner.IsFavorite(fileName),
                 _bitmaps[index],
                 _failed[index]);

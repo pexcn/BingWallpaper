@@ -744,6 +744,13 @@ internal sealed class TrayContext : ApplicationContext
             {
                 throw new InvalidOperationException("Reapplying the missing pinned wallpaper failed.");
             }
+
+            // The recovered file can have a different resolution from the missing
+            // one; keep the pin on that actual file so the next refresh finds it.
+            if (_appliedPath is null || !SetPinned(Path.GetFileName(_appliedPath)))
+            {
+                throw new InvalidOperationException("Saving the recovered pinned wallpaper failed.");
+            }
             return;
         }
 
@@ -767,15 +774,19 @@ internal sealed class TrayContext : ApplicationContext
         UpdateMenuState();
     }
 
-    /// <summary>Index of the image whose cache file is <paramref name="fileName"/>, or -1.</summary>
+    /// <summary>Index of the same dated image, regardless of file resolution, or -1.</summary>
     private int FindImageIndex(string fileName)
     {
+        if (!BingImageInfo.TryParseFileName(fileName, out string startDate, out string imageId))
+        {
+            return -1;
+        }
+
         for (int i = 0; i < _images.Count; i++)
         {
-            if (string.Equals(
-                    _images[i].GetFileName(_config.Resolution),
-                    fileName,
-                    StringComparison.OrdinalIgnoreCase))
+            BingImageInfo image = _images[i];
+            if (string.Equals(image.StartDate, startDate, StringComparison.Ordinal)
+                && string.Equals(image.ImageId, imageId, StringComparison.OrdinalIgnoreCase))
             {
                 return i;
             }

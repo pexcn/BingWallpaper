@@ -28,6 +28,9 @@ internal sealed class BingImageInfo
     /// <summary>Real tokens are far shorter; this only guards against a pathological urlbase.</summary>
     private const int MaxImageIdLength = 64;
 
+    private string _urlBase = string.Empty;
+    private string _imageId = FallbackImageId;
+
     /// <summary>yyyyMMdd, e.g. "20260818".</summary>
     public string StartDate { get; set; } = string.Empty;
 
@@ -37,7 +40,20 @@ internal sealed class BingImageInfo
     public string EndDate { get; set; } = string.Empty;
 
     /// <summary>e.g. "/th?id=OHR.WhyteCliffP_ZH-CN0573407830" - the suffix is ours to choose.</summary>
-    public string UrlBase { get; set; } = string.Empty;
+    public string UrlBase
+    {
+        get => _urlBase;
+        set
+        {
+            if (string.Equals(_urlBase, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _urlBase = value;
+            _imageId = ExtractImageId(value);
+        }
+    }
 
     /// <summary>
     /// Stable identity of the photo, taken from the "OHR.{name}" token of
@@ -46,7 +62,7 @@ internal sealed class BingImageInfo
     /// Naming cache files after it is what keeps a picture that Bing publishes in
     /// seven markets on the same day from being stored seven times.
     /// </summary>
-    public string ImageId => ExtractImageId(UrlBase);
+    public string ImageId => _imageId;
 
     public string Title { get; set; } = string.Empty;
 
