@@ -98,6 +98,7 @@ internal sealed class PickerForm : Form
     private string _statusText = "正在加载…";
     private bool _titlesLoaded;
     private bool _busy;
+    private bool _fetching;
 
     /// <summary>Set while <see cref="ApplyFavoriteAsync"/> owns <see cref="_busy"/>.</summary>
     private bool _applyingFavorite;
@@ -295,6 +296,11 @@ internal sealed class PickerForm : Form
     {
         if (images.Count == 0)
         {
+            if (_fetching)
+            {
+                return;
+            }
+
             SetStatus("正在获取最近的壁纸信息…");
             _ = FetchAsync();
             return;
@@ -323,6 +329,7 @@ internal sealed class PickerForm : Form
 
     private async Task FetchAsync()
     {
+        _fetching = true;
         try
         {
             List<BingImageInfo> images = await _context.Client
@@ -352,6 +359,10 @@ internal sealed class PickerForm : Form
             {
                 SetStatus("获取壁纸列表失败，详见日志文件。");
             }
+        }
+        finally
+        {
+            _fetching = false;
         }
     }
 

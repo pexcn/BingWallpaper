@@ -316,61 +316,67 @@ internal sealed class BingClient : IDisposable
         string tempPath = destinationPath + ".tmp";
         Logger.Debug("download: start url=" + url + " target=" + destinationPath);
 
-        long bytes = await RunWithRetryAsync(
-            async () =>
-            {
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                DeleteQuietly(tempPath);
-
-                using (HttpResponseMessage response = await _http
-                    .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                    .ConfigureAwait(false))
+        try
+        {
+            return await RunWithRetryAsync(
+                async () =>
                 {
-                    Logger.Debug("download: response status=" + (int)response.StatusCode + " " + response.StatusCode);
-                    response.EnsureSuccessStatusCode();
-
-                    using (Stream source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                    using (FileStream target = new FileStream(
-                        tempPath,
-                        FileMode.Create,
-                        FileAccess.Write,
-                        FileShare.None,
-                        81920,
-                        useAsync: true))
-                    {
-                        await source.CopyToAsync(target, 81920, cancellationToken).ConfigureAwait(false);
-                    }
-                }
-
-                stopwatch.Stop();
-                long length = new FileInfo(tempPath).Length;
-
-                int width;
-                int height;
-                string? error;
-                if (!TryValidateImage(tempPath, out width, out height, out error))
-                {
+                    Stopwatch stopwatch = Stopwatch.StartNew();
                     DeleteQuietly(tempPath);
-                    throw new InvalidDataException("Downloaded file is not a decodable image: " + error);
-                }
 
-                // Single Info line for the whole transfer: the url, the target and the
-                // outcome belong together, and separate lines drift apart once other
-                // threads interleave.
-                Logger.Info(
-                    "download: done url=" + url +
-                    " target=" + destinationPath +
-                    " bytes=" + length +
-                    " ms=" + stopwatch.ElapsedMilliseconds +
-                    " decoded=" + width + "x" + height);
+                    using (HttpResponseMessage response = await _http
+                        .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                        .ConfigureAwait(false))
+                    {
+                        Logger.Debug("download: response status=" + (int)response.StatusCode + " " + response.StatusCode);
+                        response.EnsureSuccessStatusCode();
 
-                Paths.MoveOverwrite(tempPath, destinationPath);
-                return length;
-            },
-            "download image",
-            cancellationToken).ConfigureAwait(false);
+                        using (Stream source = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                        using (FileStream target = new FileStream(
+                            tempPath,
+                            FileMode.Create,
+                            FileAccess.Write,
+                            FileShare.None,
+                            81920,
+                            useAsync: true))
+                        {
+                            await source.CopyToAsync(target, 81920, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
 
-        return bytes;
+                    stopwatch.Stop();
+                    long length = new FileInfo(tempPath).Length;
+
+                    int width;
+                    int height;
+                    string? error;
+                    if (!TryValidateImage(tempPath, out width, out height, out error))
+                    {
+                        DeleteQuietly(tempPath);
+                        throw new InvalidDataException("Downloaded file is not a decodable image: " + error);
+                    }
+
+                    // Single Info line for the whole transfer: the url, the target and the
+                    // outcome belong together, and separate lines drift apart once other
+                    // threads interleave.
+                    Logger.Info(
+                        "download: done url=" + url +
+                        " target=" + destinationPath +
+                        " bytes=" + length +
+                        " ms=" + stopwatch.ElapsedMilliseconds +
+                        " decoded=" + width + "x" + height);
+
+                    Paths.MoveOverwrite(tempPath, destinationPath);
+                    return length;
+                },
+                "download image",
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // The next attempt cannot clean up after the last failure or a cancelled backoff.
+            DeleteQuietly(tempPath);
+        }
     }
 
     /// <summary>Downloads a small resource fully into memory (history thumbnails).</summary>
